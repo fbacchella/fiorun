@@ -1,16 +1,5 @@
-#!./pybench/bin/python
+#!env python
 
-# yum-builddep python-matplotlib numpy PyYAML
-# yum install python-virtualenv
-# virtualenv pybench
-# pybench/bin/pip install numpy
-# pybench/bin/pip install six
-# pybench/bin/pip install tornado
-# pybench/bin/pip install pyparsing
-# pybench/bin/pip install nosetests
-# pybench/bin/pip install python-dateutil
-# pybench/bin/pip install matplotlib
-# pybench/bin/pip install PyYAML
 import csv
 import inspect
 import math
@@ -193,32 +182,27 @@ def do_fio(label, fio, fio_script, fio_dir, opts = None, count = 1):
             (fio_stdout, count) = re.subn(r'(^|;)([^;"]*[a-z=][^;"]*)(;|$)',r'\1"\2"\3',fio_stdout)
             if count == 0:
                 break
-        row = []
-        row.append(label)
-        row.extend(csv.reader(re.split("\n", fio_stdout),delimiter=';', quoting=csv.QUOTE_NONNUMERIC))
-        yield row
+        yield (label, csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next())
 
-csv_reader_type = type(csv.reader(""))
 def run_script(script):
     fio_values = []
     for (f, kwargs)  in script:
         print "step %s(%s)" % (f.__name__, kwargs)
         execute = f(**kwargs)
+        print execute.__class__.__name__
         if type(execute) == type(1) and execute != 0:
             raise Exception("%s failed: %s" % (f.__name__, execute))
         elif execute is False:
             raise Exception("%s failed: %s" % (f.__name__, execute))
         elif execute.__class__.__name__ == 'generator':
-            for yieled in execute:
-                if type(yieled) == csv_reader_type:
-                    csv_values = yieled.next()
-                    row = []
-                    row.append(csv_values[0])
-                    row.append(csv_values[6])
-                    row.append(csv_values[7])
-                    row.append(csv_values[47])
-                    row.append(csv_values[48])
-                    row.extend(csv_values[109:120])
+            for yielded in execute:
+                if type(yielded) == type(()) and len(yielded) == 2:
+                    row = [ yielded[0] ]
+                    row.append(yielded[1][6])
+                    row.append(yielded[1][7])
+                    row.append(yielded[1][47])
+                    row.append(yielded[1][48])
+                    row.extend(yielded[1][109:120])
                     fio_values.append(row)
     return fio_values
 
@@ -263,7 +247,6 @@ def plot(fio_values, mode="bw", filename=None):
         ms_values.append(row[5:])
         
     waitarray = numpy.array(ms_values).transpose()
-
     fig = Figure(subplotpars=SubplotParams(right=0.85, left=0.07))
     ax1 = fig.add_subplot(1,1,1)
     # put the major ticks at the middle of each cell, notice "reverse" use of dimension
@@ -355,7 +338,6 @@ def read_csv(filename):
     plot(values, mode="bw", filename="/tmp/my.png")
 
 def read_yaml(filename):
-    print filename
     yaml_file = open(filename)
     script_yaml = yaml.safe_load(yaml_file)
     yaml_file.close()
