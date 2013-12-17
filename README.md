@@ -23,43 +23,66 @@ run, the steps to execute.
 
 A simple yaml look likes :
 
-default:
-    blockdevice: "/dev/sdb"
-    mount_point: "/bench"
-    part: "/dev/sdb"
-    fio: "/opt/bench/fio-2.1.4/fio"
-    fio_script: "test.fio"
-    fio_dir: "/bench/fio"
-    count: 3
-plot:
-  mode: bw
-  filename: /opt/bench/test.png
-csv:
-  filename: /opt/bench/test.csv
-run:
-  - do_part:
-# simple fs
-  - do_xfs:
-  - do_mount_xfs:
-  - do_fio:
-      label: "simple xfs"
-# unaligned and log device
-  - do_xfs:
-      logdev: "/dev/sdc"
-  - do_mount_xfs:
-      logdev: "/dev/cciss/c0d2"
-  - do_fio:
-      label: "with logdevice"
+    default:
+        blockdevice: "/dev/sdb"
+        mount_point: "/bench"
+        part: "/dev/sdb"
+        fio: "/opt/bench/fio-2.1.4/fio"
+        fio_script: "test.fio"
+        fio_dir: "/bench/fio"
+        count: 3
+    plot:
+      mode: bw
+      filename: /opt/bench/test.png
+    csv:
+      filename: /opt/bench/test.csv
+    run:
+      - do_part:
+    # simple fs
+      - do_xfs:
+      - do_mount_xfs:
+      - do_fio:
+          label: "simple xfs"
+    # unaligned and log device
+      - do_xfs:
+          logdev: "/dev/sdc"
+      - do_mount_xfs:
+          logdev: "/dev/cciss/c0d2"
+      - do_fio:
+          label: "with logdevice"
 
 Installation
 ============
 
 It needs matplotlib and PyYAML.
 
-So to build an python virtual env with latest dependencies version, on a redhat, one can run :
-yum-builddep python-matplotlib numpy PyYAML
-yum install python-virtualenv
-cd /opt/bench
-virtualenv pybench
-pybench/bin/pip install matplotlib
-pybench/bin/pip install PyYAML
+So to build an python virtual env with latest dependencies version, on a Redhat, one can run :
+
+    yum-builddep python-matplotlib numpy PyYAML
+    yum install python-virtualenv
+    cd /opt/bench
+    virtualenv pybench
+    pybench/bin/pip install matplotlib
+    pybench/bin/pip install PyYAML
+
+Actions
+=======
+
+* modify_cciss
+
+  apply a modification on a Smart Array controler
+
+   * object (mandatory): either ctrl or ld, will apply the modification on the controler or the logicial drive
+   * command (mandatory): the modify command to execute
+   * slot: the slot to identify the controler
+   * ld: the logical drive
+
+* do_cciss_ld
+
+  create a ld on a Smart Array controller
+
+* wait_cciss_ld
+* do_part
+* do_mount_xfs
+* do_fio
+* do_xfs
