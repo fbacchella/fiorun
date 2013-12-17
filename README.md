@@ -5,7 +5,7 @@ A python script to launch many fio bench.
 
 It can be used to create a logical drive, create a new partition or reformat the partition.
 
-Actually, only HP's smart array logical drive are supported, help is welcome.
+Actually, only HP's smart array logical drive are supported for hardware raid, help is welcome.
 
 It only runs on linux.
 
@@ -21,7 +21,7 @@ The sections for the yaml file are :
   
   each command will look in the defaults for the missing arguments. Every default value can be change on the command line with -D key=value
 
-* variables, some variables used in the fio script
+* variables, some variables used in the fio script, see description latter
 * plot, to describe the output image
 * csv, to describe the output csv
 * run, the steps to execute.
@@ -44,12 +44,12 @@ A simple yaml look likes :
     run:
       - do_part:
     # simple fs
-      - do_xfs:
+      - do_fs_xfs:
       - do_mount_xfs:
       - do_fio:
           label: "A"
     # unaligned and log device
-      - do_xfs:
+      - do_fs_xfs:
           logdev: "/dev/sdc"
       - do_mount_xfs:
           logdev: "/dev/cciss/c0d2"
@@ -75,7 +75,7 @@ Actions
 
 * modify_cciss
 
-  apply a modification on a Smart Array controler
+  apply a modification on a HP's SmartArray controler
 
    * object (mandatory): either ctrl or ld, will apply the modification on the controler or the logicial drive
    * command (mandatory): the modify command to execute
@@ -84,13 +84,59 @@ Actions
 
 * do_cciss_ld
 
-  create a logical drive on a Smart Array controller
+  create a logical drive on a HP's SmartArray.
+
+   * slot (mandatory): the slot to identify the controler
+   * ld (mandatory): the logical drive
 
 * wait_cciss_ld
+
+  Wait for HP's SmartArray logical drive to be ready after a RAID creation.
+
+   * slot (mandatory): the slot to identify the controler
+   * ld (mandatory): the logical drive
+
 * do_part
+
+  Create a partition on a block device. If stripsize and stripcount are given, cylinder size
+  will be stripsize * stripcount.
+
+   * blockdevice (mandatory): the block device to partition
+   * stripsize (in kB): an optionnal strip size for alignement
+   * stripcount: an optionnal number of strip
+
+* do_fs_xfs
+  
+  Create a xfs file system. If stripsize and stripcount are given, fs alignement hint will be given
+  to the mkfs command.
+
+   * part (mandatory): the partion to use
+   * logdev: a possible external log device
+   * stripsize (in kB): strip size
+   * stripcount: the number of strips
+
+* do_mount
+
+  Mount a file system
+
+   * part (mandatory): the partition to mount
+   * mount_point (mandatory): where to mount the filesystem
+   * fs_type (mandatory): the file system type to mount
+   * options: the options to use for the mount
+
 * do_mount_xfs
+
+  Mount a xfs file system
+
 * do_fio
-* do_xfs
+
+  Launch a fio script.
+
+   * label (mandatory): a string to identify the run
+   * fio_script (mandatory): the fio script to run
+   * fio_dir (mandatory): the fio work dir
+   * fio: the path to the fio command
+   * count: the number of fio run
 
 Variables
 =========
