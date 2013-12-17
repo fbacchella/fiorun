@@ -16,6 +16,8 @@ import sys
 import time
 import yaml
 
+from optparse import OptionParser
+
 try:
     import ctypes
     libc = ctypes.CDLL("libc.so.6")
@@ -28,7 +30,20 @@ def check_dev(blockdevice):
         return stat.S_ISBLK(blockdev.st_mode)
     except:
         return False
-    
+
+def modify_cciss(object, command, slot=None, ld=None):
+    libc.sync()
+    identity = []
+    identity.extend(["ctrl", "slot=%s" % slot])
+    if object == "ld":
+        identity.extend(["ld", "%s" % ld])
+    cciss_args = ["/usr/sbin/hpacucli"]
+    cciss_args.extend(identity)
+    cciss_args.append("modify")
+    cciss_args.extend(command.split(" "))
+    hpacucli = subprocess.Popen(cciss_args, stdin=None)
+    return hpacucli.wait()
+        
 def get_cciss_info(slot, ld):
     libc.sync()
     check_ld = subprocess.Popen(["/usr/sbin/hpacucli", "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
@@ -154,7 +169,15 @@ def do_mount_xfs(mount_point, part, logdev=None, noatime=True, inode64=True):
     mount_args.append(mount_point)
     return subprocess.Popen(mount_args).wait()
     
-def do_fio(label, fio, fio_script, fio_dir, opts = None, count = 1):
+def do_fio(label, fio, fio_script, fio_dir, opts = None, count = 1, variables = {}):
+    # if a variable is a dict, use the label as a key to the real value
+    variables_clean ={}
+    for (key, value)  in variables.items():
+        if value.__class__ == {}.__class__:
+            variables_clean[key] = value[label]
+        else:
+            variables_clean[key] = value
+
     for i in range(count):
         libc.sync()
         drop_caches = open('/proc/sys/vm/drop_caches', 'w')
@@ -168,10 +191,19 @@ def do_fio(label, fio, fio_script, fio_dir, opts = None, count = 1):
                 os.mkdir(fio_dir)
             else:
                 raise e
-        fio_args = [fio, fio_script, "--minimal"]
+        (script_r, script_w) = os.pipe()
+        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
         if opts:
             fio_args.extend(opts)
-        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE)
+        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
+        os.close(script_r)
+        
+        # Parse the fio script as a template
+        with open(fio_script, "r") as fio_script_file:
+            for line in fio_script_file:
+                os.write(script_w, string.Template(line).substitute(variables_clean))
+        os.close(script_w)
+        
         fio_stdout = fio_process.communicate()[0]
         status = fio_process.wait()
         if status != 0:
@@ -189,7 +221,6 @@ def run_script(script):
     for (f, kwargs)  in script:
         print "step %s(%s)" % (f.__name__, kwargs)
         execute = f(**kwargs)
-        print execute.__class__.__name__
         if type(execute) == type(1) and execute != 0:
             raise Exception("%s failed: %s" % (f.__name__, execute))
         elif execute is False:
@@ -206,9 +237,9 @@ def run_script(script):
                     fio_values.append(row)
     return fio_values
 
-def run_yaml(script_yaml):
+def run_yaml(script_yaml,skip):
     script = []
-    for cmd in script_yaml['run']:
+    for cmd in script_yaml['run'][skip:]:
         cmd_name = cmd.keys()[0]
         cmd_args = cmd[cmd_name]
         if cmd_args == None:
@@ -217,12 +248,17 @@ def run_yaml(script_yaml):
             print "unknown %s" % cmd_name
         cmd_func = solver[cmd_name]
         kwargs = {}
+        # Enumerate all argument in the function, and check from where
+        # to find the value
         for arg_name in inspect.getargspec(cmd_func).args:
             if arg_name in cmd_args:
                 kwargs[arg_name] = cmd_args[arg_name]
                 del cmd_args[arg_name]
-            elif arg_name in script_yaml['default']:
-                kwargs[arg_name] = script_yaml['default'][arg_name]
+            elif arg_name == 'variables':
+                kwargs[arg_name] = script_yaml['variables']
+            elif arg_name in script_yaml['defaults']:
+                kwargs[arg_name] = script_yaml['defaults'][arg_name]
+        # not all arguments from the yaml file used, something is wrong
         if len(cmd_args) > 0:
             raise Exception("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
         script.append((cmd_func, kwargs))
@@ -337,11 +373,21 @@ def read_csv(filename):
                 values.append(row)
     plot(values, mode="bw", filename="/tmp/my.png")
 
-def read_yaml(filename):
+def read_yaml(filename, defaults, variables, skip):
     yaml_file = open(filename)
     script_yaml = yaml.safe_load(yaml_file)
     yaml_file.close()
-    fio_values = run_yaml(script_yaml)
+    if not 'defaults' in script_yaml:
+        script_yaml['defaults'] = {}
+    for (key,value) in defaults.items():
+        script_yaml['defaults'][key] = value
+        
+    if not 'variables' in script_yaml:
+        script_yaml['variables'] = {}        
+    for (key,value) in variables.items():
+        script_yaml['variables'][key] = value
+
+    fio_values = run_yaml(script_yaml, skip)
 
     if('csv' in script_yaml):
         save_csv(fio_values, **script_yaml['csv'])
@@ -349,13 +395,33 @@ def read_yaml(filename):
     plot(fio_values, **script_yaml['plot'])
 
 solver = {}
-for function in (do_cciss_ld, wait_cciss_ld, do_part, do_mount_xfs, do_fio, do_xfs):
+for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount_xfs, do_fio, do_xfs):
     solver[function.__name__] = function
+    
+parser = OptionParser()
+parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
+parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
+parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
+parser.add_option("-s", "--skip", action="store", dest="skip", default=0, type="int")
 
-[file_use] = sys.argv[1:]
-fileName, fileExtension = os.path.splitext(file_use)
+(options, args) = parser.parse_args()
 
-if fileExtension == '.csv':
-    read_csv(file_use)
-else:
-    read_yaml(file_use)
+defaults = {}
+for default in options.defaults:
+    (key, value) = default.split("=")
+    if key == 'count':
+        value = int(value)
+    defaults[key] = value
+    
+variables = {}
+for default in options.variables:
+    (key, value) = default.split("=")
+    variables[key] = value
+
+for file_use in args:
+    fileName, fileExtension = os.path.splitext(file_use)
+
+    if fileExtension == '.csv':
+        read_csv(file_use)
+    else:
+        read_yaml(file_use, defaults, variables, options.skip)
