@@ -70,7 +70,7 @@ def wait_cciss_ld(slot, ld):
     return True
 
 completed_re = re.compile("Parity Initialization Status: (.+)")
-def do_cciss_ld(slot, ld, stripsize, raid):
+def do_cciss_ld(slot, ld, raid, stripsize=None):
     ld_info =  get_cciss_info(slot=slot, ld=ld)
     if 'Disk Name' in ld_info:
         blockdevice = ld_info['Disk Name']
@@ -137,7 +137,7 @@ def do_part(blockdevice, stripsize=0, stripcount=0):
     else:
         return False
 
-def do_xfs(part, logdev=None, stripsize=0, stripcount=0):
+def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
     smart_unmount(part=part)
     if not check_dev(part):
         return False
@@ -151,10 +151,18 @@ def do_xfs(part, logdev=None, stripsize=0, stripcount=0):
     mkfs_args.append(part)
     return subprocess.Popen(mkfs_args).wait()
 
-def do_mount_xfs(mount_point, part, logdev=None, noatime=True, inode64=True):
+def do_mount(part, mount_point, fs_type, options = []):
     smart_unmount(path=mount_point)
     libc.sync()
-    mount_args = ["mount", "-t", "xfs"]
+    mount_args = ["mount", "-t", fs_type]
+    if len(options) > 0:
+        mount_args.append("-o")
+        mount_args.append(",".join(options))
+    mount_args.append(part)
+    mount_args.append(mount_point)
+    return subprocess.Popen(mount_args).wait()
+
+def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
     options = []
     if noatime:
         options.append("noatime")
@@ -162,14 +170,9 @@ def do_mount_xfs(mount_point, part, logdev=None, noatime=True, inode64=True):
         options.append("inode64")
     if logdev:
         options.append("logdev=%s" % logdev)
-    if len(options) > 0:
-        mount_args.append("-o")
-        mount_args.append(",".join(options))
-    mount_args.append(part)
-    mount_args.append(mount_point)
-    return subprocess.Popen(mount_args).wait()
-    
-def do_fio(label, fio, fio_script, fio_dir, opts = None, count = 1, variables = {}):
+    do_mount(part, mount_point, 'xfs', options)
+
+def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
     # if a variable is a dict, use the label as a key to the real value
     variables_clean ={}
     for (key, value)  in variables.items():
@@ -395,7 +398,7 @@ def read_yaml(filename, defaults, variables, skip):
     plot(fio_values, **script_yaml['plot'])
 
 solver = {}
-for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount_xfs, do_fio, do_xfs):
+for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount, do_mount_xfs, do_fio, do_fs_xfs):
     solver[function.__name__] = function
     
 parser = OptionParser()
