@@ -16,14 +16,19 @@ After the execution a image and a csv is produced with values.
 The image shows an heat map with response time and plot the bandwith or io/s.
 
 The sections for the yaml file are :
-default, to describe common values
-plot, to describe the output image
-csv, to describe the output csv
-run, the steps to execute.
+
+* defaults, to describe common values
+  
+  each command will look in the defaults for the missing arguments. Every default value can be change on the command line with -D key=value
+
+* variables, some variables used in the fio script
+* plot, to describe the output image
+* csv, to describe the output csv
+* run, the steps to execute.
 
 A simple yaml look likes :
 
-    default:
+    defaults:
         blockdevice: "/dev/sdb"
         mount_point: "/bench"
         part: "/dev/sdb"
@@ -42,14 +47,14 @@ A simple yaml look likes :
       - do_xfs:
       - do_mount_xfs:
       - do_fio:
-          label: "simple xfs"
+          label: "A"
     # unaligned and log device
       - do_xfs:
           logdev: "/dev/sdc"
       - do_mount_xfs:
           logdev: "/dev/cciss/c0d2"
       - do_fio:
-          label: "with logdevice"
+          label: "B"
 
 Installation
 ============
@@ -79,10 +84,19 @@ Actions
 
 * do_cciss_ld
 
-  create a ld on a Smart Array controller
+  create a logical drive on a Smart Array controller
 
 * wait_cciss_ld
 * do_part
 * do_mount_xfs
 * do_fio
 * do_xfs
+
+Variables
+=========
+
+The fio scripts are parsed using python's string.Template. The value for a variable is read from the `variable` section in the yaml file.
+
+If a variable is a mapping, it will use the label given to do_fio to find the value to use.
+
+Any variable can be overriden on the command line with -V key=value
