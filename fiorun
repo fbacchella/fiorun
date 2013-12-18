@@ -171,6 +171,27 @@ def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
     if logdev:
         options.append("logdev=%s" % logdev)
     do_mount(part, mount_point, 'xfs', options)
+    
+def sched_tune(blockdevice, scheduler=None, tunes = {}):
+    if scheduler:
+        scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
+        stat_info = os.stat(scheduler_file)
+        if not stat.S_ISREG(stat_info.st_mode):
+            return false
+        with open(scheduler_file, "w") as f:
+            f.write(scheduler)
+    if len(tunes) > 0:
+        scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/','').replace('/', '!')
+        stat_info = os.stat(scheduler_dir)
+        if not stat.S_ISDIR(stat_info.st_mode):
+            return False
+        for (tune, value) in tunes.items():
+            tune_file = '%s/%s' % (scheduler_dir, tune )
+            stat_info = os.stat(tune_file)
+            if not stat.S_ISREG(stat_info.st_mode):
+                return False
+            with open(tune_file, "w") as f:                    
+                f.write("%s" % value)
 
 def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
     # if a variable is a dict, use the label as a key to the real value
@@ -398,7 +419,7 @@ def read_yaml(filename, defaults, variables, skip):
     plot(fio_values, **script_yaml['plot'])
 
 solver = {}
-for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount, do_mount_xfs, do_fio, do_fs_xfs):
+for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount, do_mount_xfs, do_fio, do_fs_xfs, sched_tune):
     solver[function.__name__] = function
     
 parser = OptionParser()

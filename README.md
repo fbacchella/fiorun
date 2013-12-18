@@ -138,6 +138,15 @@ Actions
    * fio: the path to the fio command
    * count: the number of fio run
 
+* sched_tune
+
+  Tune the scheduler for the block device
+
+
+   * blockdevice (mandatory): the block device to tune
+   * scheduler: the scheduler name
+   * tunes: a mapping of scheduler tune values to set
+
 Variables
 =========
 
