@@ -142,10 +142,15 @@ Actions
 
   Tune the scheduler for the block device
 
-
    * blockdevice (mandatory): the block device to tune
    * scheduler: the scheduler name
    * tunes: a mapping of scheduler tune values to set
+
+* clean
+
+  Clean the run directory
+
+   * fio_dir (mandatory): the directory to clean
 
 Variables
 =========
@@ -155,3 +160,13 @@ The fio scripts are parsed using python's string.Template. The value for a varia
 If a variable is a mapping, it will use the label given to do_fio to find the value to use.
 
 Any variable can be overriden on the command line with -V key=value
+
+For example, by adding the following section to the yaml file:
+
+    variables:
+        size:
+            A: "1G"
+            B: "2G"
+            C: "4G"
+
+The do_fio commands with label A, B, C will run the fio script with subtituting the variable ${size} with the respective value "1G", "2G", "4G"
