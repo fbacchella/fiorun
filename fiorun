@@ -471,9 +471,7 @@ def read_yaml(filename, defaults, variables, skip):
         save_csv(fio_values, **script_yaml['csv'])
     plot(fio_values, **script_yaml['plot'])
 
-solver = {}
-for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
-    solver[name] = function
+def main(argv=None):
     
 parser = OptionParser()
 parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
@@ -506,3 +504,13 @@ for file_use in args:
        except FioException as e:
            print e
            break
+
+solver = {}
+for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
+    solver[name] = function
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(1)
