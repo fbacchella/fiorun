@@ -36,6 +36,12 @@ def check_dev(blockdevice):
     except:
         return False
 
+ 
+# A class used as a container for command
+# To add a new command, just add a staticmethod to this class
+class Commands(object):
+
+    @staticmethod
 def modify_cciss(object, command, slot=None, ld=None):
     libc.sync()
     identity = []
@@ -49,6 +55,7 @@ def modify_cciss(object, command, slot=None, ld=None):
     hpacucli = subprocess.Popen(cciss_args, stdin=None)
     return hpacucli.wait()
         
+    @staticmethod
 def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
     libc.sync()
     check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
@@ -62,6 +69,7 @@ def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
              values[entry[0].strip()] = entry[1].strip()
     return values
 
+    @staticmethod
 def wait_cciss_ld(slot, ld):
     while True:
         ld_info = get_cciss_info(slot=slot, ld=ld)
@@ -70,10 +78,10 @@ def wait_cciss_ld(slot, ld):
         if ld_info["Parity Initialization Status"] == "Initialization Completed":
             return
         if "Parity Initialization Progress" in ld_info:
-            print ld_info["Parity Initialization Progress"]
+                print ld_info["Parity Initialization in Progress"]
         time.sleep(30)
 
-completed_re = re.compile("Parity Initialization Status: (.+)")
+    @staticmethod
 def do_cciss_ld(slot, ld, raid, stripsize=None, hpacucli="/usr/sbin/hpacucli"):
     ld_info =  get_cciss_info(slot=slot, ld=ld)
     if 'Disk Name' in ld_info:
@@ -92,6 +100,7 @@ def do_cciss_ld(slot, ld, raid, stripsize=None, hpacucli="/usr/sbin/hpacucli"):
     hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
     return hpacucli.wait()
 
+    @staticmethod
 def smart_unmount(path=None, part=None, blockdevice=None):
     if blockdevice:
         if not check_dev(blockdevice):
@@ -123,6 +132,7 @@ def smart_unmount(path=None, part=None, blockdevice=None):
     if benchdir.st_dev != updir.st_dev:
         return subprocess.Popen(["umount", path]).wait()
 
+    @staticmethod
 def do_part(blockdevice, stripsize=0, stripcount=0):
     smart_unmount(blockdevice=blockdevice)
     sfdisk_args = ["sfdisk", "-L" ]
@@ -140,6 +150,7 @@ def do_part(blockdevice, stripsize=0, stripcount=0):
     else:
         return False
 
+    @staticmethod
 def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
     smart_unmount(part=part)
     if not check_dev(part):
@@ -154,6 +165,7 @@ def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
     mkfs_args.append(part)
     return subprocess.Popen(mkfs_args).wait()
 
+    @staticmethod
 def do_mount(part, mount_point, fs_type, options = []):
     smart_unmount(path=mount_point)
     libc.sync()
@@ -165,6 +177,7 @@ def do_mount(part, mount_point, fs_type, options = []):
     mount_args.append(mount_point)
     return subprocess.Popen(mount_args).wait()
 
+    @staticmethod
 def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
     options = []
     if noatime:
@@ -175,6 +188,7 @@ def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
         options.append("logdev=%s" % logdev)
     do_mount(part, mount_point, 'xfs', options)
     
+    @staticmethod
 def sched_tune(blockdevice, scheduler=None, tunes = {}):
     if scheduler:
         scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
@@ -196,6 +210,7 @@ def sched_tune(blockdevice, scheduler=None, tunes = {}):
             with open(tune_file, "w") as f:                    
                 f.write("%s" % value)
 
+    @staticmethod
 def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
     # if a variable is a dict, use the label as a key to the real value
     variables_clean ={}
@@ -255,6 +270,7 @@ def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, vari
         except ValueError as e:
             raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
             
+    @staticmethod
 def clean(fio_dir):
     try:
         for root, subFolders, files in os.walk(fio_dir, topdown=False):
@@ -293,7 +309,7 @@ def run_yaml(script_yaml,skip):
     script = []
     for cmd in script_yaml['run'][skip:]:
         # if the command is a plain string,
-        # it's a command withou arguments
+        # it's a command without arguments
         if type(cmd) == type(""):
             cmd = {cmd: None}
         cmd_name = cmd.keys()[0]
@@ -456,8 +472,8 @@ def read_yaml(filename, defaults, variables, skip):
     plot(fio_values, **script_yaml['plot'])
 
 solver = {}
-for function in (modify_cciss, do_cciss_ld, wait_cciss_ld, do_part, do_mount, do_mount_xfs, do_fio, do_fs_xfs, sched_tune, clean):
-    solver[function.__name__] = function
+for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
+    solver[name] = function
     
 parser = OptionParser()
 parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
