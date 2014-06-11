@@ -19,10 +19,21 @@ import yaml
 from optparse import OptionParser
 
 try:
+    import platform
     import ctypes
-    libc = ctypes.CDLL("libc.so.6")
+    libcver = platform.libc_ver()
+    if libcver[0] == 'libc':
+        libc = ctypes.CDLL("libc.so.%s" % libcver[1])
+    elif libcver[0] == 'glibc' and libcver[1].startswith("2."):
+        libc = ctypes.CDLL("libc.so.6")
+    else:
+        libc = None
+    if libc:
+        sync = libc.sync
+    else:
+        sync = lambda : None
 except:
-    libc = lambda : None
+    sync = lambda : None
 
 # A empty exception class
 # used to catch managed exception and errors
@@ -43,7 +54,7 @@ class Commands(object):
 
     @staticmethod
     def modify_cciss(object, command, slot=None, ld=None):
-        libc.sync()
+        sync()
         identity = []
         identity.extend(["ctrl", "slot=%s" % slot])
         if object == "ld":
@@ -57,7 +68,7 @@ class Commands(object):
         
     @staticmethod
     def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
-        libc.sync()
+        sync()
         check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
         output = check_ld.communicate()[0]
         if check_ld.wait() != 0:
@@ -96,7 +107,7 @@ class Commands(object):
                 status = hpacucli.wait()
                 if status != 0:
                     raise FioException("hpacucli failed with status %s", status)
-            libc.sync()
+            sync()
         hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
         return hpacucli.wait()
 
@@ -145,7 +156,7 @@ class Commands(object):
         sfdisk = subprocess.Popen(sfdisk_args, stdin=subprocess.PIPE)
         sfdisk.communicate(input="1,,,\n")
         if sfdisk.wait() == 0:
-            libc.sync()
+            sync()
             return subprocess.Popen(["blockdev", "--flushbufs", blockdevice]).wait()
         else:
             return False
@@ -168,7 +179,7 @@ class Commands(object):
     @staticmethod
     def do_mount(part, mount_point, fs_type, options = []):
         Commands.smart_unmount(path=mount_point)
-        libc.sync()
+        sync()
         mount_args = ["mount", "-t", fs_type]
         if len(options) > 0:
             mount_args.append("-o")
@@ -222,7 +233,7 @@ class Commands(object):
 
         flush_perms = True
         for i in range(count):
-            libc.sync()
+            sync()
             if flush_perms:
                 try:
                     drop_caches = open('/proc/sys/vm/drop_caches', 'w')
