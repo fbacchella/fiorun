@@ -1,4 +1,4 @@
-#!env python
+#!/usr/bin/env python
 
 import csv
 import inspect
@@ -22,13 +22,13 @@ try:
     import ctypes
     libc = ctypes.CDLL("libc.so.6")
 except:
-    pass
+    libc = lambda : None
 
 # A empty exception class
 # used to catch managed exception and errors
 class FioException(Exception):
     pass
-
+ 
 def check_dev(blockdevice):
     try:
         blockdev = os.stat(blockdevice)
@@ -42,250 +42,253 @@ def check_dev(blockdevice):
 class Commands(object):
 
     @staticmethod
-def modify_cciss(object, command, slot=None, ld=None):
-    libc.sync()
-    identity = []
-    identity.extend(["ctrl", "slot=%s" % slot])
-    if object == "ld":
-        identity.extend(["ld", "%s" % ld])
-    cciss_args = ["/usr/sbin/hpacucli"]
-    cciss_args.extend(identity)
-    cciss_args.append("modify")
-    cciss_args.extend(command.split(" "))
-    hpacucli = subprocess.Popen(cciss_args, stdin=None)
-    return hpacucli.wait()
+    def modify_cciss(object, command, slot=None, ld=None):
+        libc.sync()
+        identity = []
+        identity.extend(["ctrl", "slot=%s" % slot])
+        if object == "ld":
+            identity.extend(["ld", "%s" % ld])
+        cciss_args = ["/usr/sbin/hpacucli"]
+        cciss_args.extend(identity)
+        cciss_args.append("modify")
+        cciss_args.extend(command.split(" "))
+        hpacucli = subprocess.Popen(cciss_args, stdin=None)
+        return hpacucli.wait()
         
     @staticmethod
-def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
-    libc.sync()
-    check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
-    output = check_ld.communicate()[0]
-    if check_ld.wait() != 0:
-        return {}
-    values = {}
-    for l in re.split("\n", output):
-	 entry = re.split(":", l)
-         if len(entry) == 2:
-             values[entry[0].strip()] = entry[1].strip()
-    return values
+    def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
+        libc.sync()
+        check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
+        output = check_ld.communicate()[0]
+        if check_ld.wait() != 0:
+            return {}
+        values = {}
+        for l in re.split("\n", output):
+    	    entry = re.split(":", l)
+            if len(entry) == 2:
+                values[entry[0].strip()] = entry[1].strip()
+        return values
 
     @staticmethod
-def wait_cciss_ld(slot, ld):
-    while True:
-        ld_info = get_cciss_info(slot=slot, ld=ld)
-        if not "Parity Initialization Status" in ld_info:
-            return
-        if ld_info["Parity Initialization Status"] == "Initialization Completed":
-            return
-        if "Parity Initialization Progress" in ld_info:
+    def wait_cciss_ld(slot, ld):
+        while True:
+            ld_info = Commands.get_cciss_info(slot=slot, ld=ld)
+            if not "Parity Initialization Status" in ld_info:
+                return
+            if ld_info["Parity Initialization Status"] == "Initialization Completed":
+                return
+            if "Parity Initialization Progress" in ld_info:
                 print ld_info["Parity Initialization in Progress"]
-        time.sleep(30)
+            time.sleep(30)
 
     @staticmethod
-def do_cciss_ld(slot, ld, raid, stripsize=None, hpacucli="/usr/sbin/hpacucli"):
-    ld_info =  get_cciss_info(slot=slot, ld=ld)
-    if 'Disk Name' in ld_info:
-        blockdevice = ld_info['Disk Name']
-        if check_dev(blockdevice):
-            for mount_info in ld_info['Mount Points'].split(','):
-                if mount_info.strip() == 'None':
-                    continue
-                mount_point = mount_info.strip().split(' ')[0]
-                smart_unmount(path=mount_point)
-            hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)	
-            status = hpacucli.wait()
-            if status != 0:
-                raise FioException("hpacucli failed with status %s", status)
-        libc.sync()
-    hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
-    return hpacucli.wait()
+    def do_cciss_ld(slot, ld, raid, stripsize=None, hpacucli="/usr/sbin/hpacucli"):
+        ld_info =  Commands.get_cciss_info(slot=slot, ld=ld)
+        if 'Disk Name' in ld_info:
+            blockdevice = ld_info['Disk Name']
+            if check_dev(blockdevice):
+                for mount_info in ld_info['Mount Points'].split(','):
+                    if mount_info.strip() == 'None':
+                        continue
+                    mount_point = mount_info.strip().split(' ')[0]
+                    Commands.smart_unmount(path=mount_point)
+                hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)	
+                status = hpacucli.wait()
+                if status != 0:
+                    raise FioException("hpacucli failed with status %s", status)
+            libc.sync()
+        hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
+        return hpacucli.wait()
 
     @staticmethod
-def smart_unmount(path=None, part=None, blockdevice=None):
-    if blockdevice:
-        if not check_dev(blockdevice):
-            return True
-        # substitution needed because of cciss/cXdX with HP's Smart Arrays
+    def smart_unmount(path=None, part=None, blockdevice=None):
+        if blockdevice:
+            if not check_dev(blockdevice):
+                return True
+            # substitution needed because of cciss/cXdX with HP's Smart Arrays
+            old_path = os.getcwdu()
+            os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
+            for d in filter( lambda x: stat.S_ISDIR(os.stat(x).st_mode ) and os.path.exists("%s/dev" % x),
+                             os.listdir('.')):
+                if Commands.smart_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
+                    os.chdir(old_path)
+                    return False
+            os.chdir(old_path)
+            return 0
+        if part:
+            proc_mount = open('/proc/mounts', 'r')
+            for l in proc_mount.readlines():
+                mounted = l.split(" ")
+                if mounted[0] == part:
+                    path = mounted[1]
+                    break
+        if not path:
+            return
         old_path = os.getcwdu()
-        os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
-        for d in filter( lambda x: stat.S_ISDIR(os.stat(x).st_mode ) and os.path.exists("%s/dev" % x),
-                         os.listdir('.')):
-            if smart_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
-                os.chdir(old_path)
-                return False
+        os.chdir(path)
+        benchdir = os.stat(".")
+        updir = os.stat("..")
         os.chdir(old_path)
-        return 0
-    if part:
-        proc_mount = open('/proc/mounts', 'r')
-        for l in proc_mount.readlines():
-            mounted = l.split(" ")
-            if mounted[0] == part:
-                path = mounted[1]
-                break
-    if not path:
-        return
-    old_path = os.getcwdu()
-    os.chdir(path)
-    benchdir = os.stat(".")
-    updir = os.stat("..")
-    os.chdir(old_path)
-    if benchdir.st_dev != updir.st_dev:
-        return subprocess.Popen(["umount", path]).wait()
+        if benchdir.st_dev != updir.st_dev:
+            return subprocess.Popen(["umount", path]).wait()
 
     @staticmethod
-def do_part(blockdevice, stripsize=0, stripcount=0):
-    smart_unmount(blockdevice=blockdevice)
-    sfdisk_args = ["sfdisk", "-L" ]
-    if stripsize != 0 and stripcount != 0:
-        while stripsize * 2 > 63:
-            stripsize /= 2
-            stripcount *= 2
-        sfdisk_args.extend(["-uC", "-H", "%s" % stripcount , "-S", "%s" % (stripsize * 2)])
-    sfdisk_args.append(blockdevice)
-    sfdisk = subprocess.Popen(sfdisk_args, stdin=subprocess.PIPE)
-    sfdisk.communicate(input="1,,,\n")
-    if sfdisk.wait() == 0:
+    def do_part(blockdevice, stripsize=0, stripcount=0):
+        Commands.smart_unmount(blockdevice=blockdevice)
+        sfdisk_args = ["sfdisk", "-L" ]
+        if stripsize != 0 and stripcount != 0:
+            while stripsize * 2 > 63:
+                stripsize /= 2
+                stripcount *= 2
+            sfdisk_args.extend(["-uC", "-H", "%s" % stripcount , "-S", "%s" % (stripsize * 2)])
+        sfdisk_args.append(blockdevice)
+        sfdisk = subprocess.Popen(sfdisk_args, stdin=subprocess.PIPE)
+        sfdisk.communicate(input="1,,,\n")
+        if sfdisk.wait() == 0:
+            libc.sync()
+            return subprocess.Popen(["blockdev", "--flushbufs", blockdevice]).wait()
+        else:
+            return False
+
+    @staticmethod
+    def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
+        Commands.smart_unmount(part=part)
+        if not check_dev(part):
+            return False
+        if logdev and not check_dev(logdev):
+            return False
+        mkfs_args = ["mkfs.xfs", "-f", "-L", "bench"]
+        if logdev:
+            mkfs_args.extend(["-l", "logdev=%s" % logdev, "-l", "size=2136997888" ])
+        if stripsize !=0 and stripcount != 0:
+            mkfs_args.extend(["-d", "su=%s" %(stripsize * 1024), "-d", "sw=%s" % stripcount])
+        mkfs_args.append(part)
+        return subprocess.Popen(mkfs_args).wait()
+
+    @staticmethod
+    def do_mount(part, mount_point, fs_type, options = []):
+        Commands.smart_unmount(path=mount_point)
         libc.sync()
-        return subprocess.Popen(["blockdev", "--flushbufs", blockdevice]).wait()
-    else:
-        return False
+        mount_args = ["mount", "-t", fs_type]
+        if len(options) > 0:
+            mount_args.append("-o")
+            mount_args.append(",".join(options))
+        mount_args.append(part)
+        mount_args.append(mount_point)
+        return subprocess.Popen(mount_args).wait()
 
     @staticmethod
-def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
-    smart_unmount(part=part)
-    if not check_dev(part):
-        return False
-    if logdev and not check_dev(logdev):
-        return False
-    mkfs_args = ["mkfs.xfs", "-f", "-L", "bench"]
-    if logdev:
-        mkfs_args.extend(["-l", "logdev=%s" % logdev, "-l", "size=2136997888" ])
-    if stripsize !=0 and stripcount != 0:
-        mkfs_args.extend(["-d", "su=%s" %(stripsize * 1024), "-d", "sw=%s" % stripcount])
-    mkfs_args.append(part)
-    return subprocess.Popen(mkfs_args).wait()
-
-    @staticmethod
-def do_mount(part, mount_point, fs_type, options = []):
-    smart_unmount(path=mount_point)
-    libc.sync()
-    mount_args = ["mount", "-t", fs_type]
-    if len(options) > 0:
-        mount_args.append("-o")
-        mount_args.append(",".join(options))
-    mount_args.append(part)
-    mount_args.append(mount_point)
-    return subprocess.Popen(mount_args).wait()
-
-    @staticmethod
-def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
-    options = []
-    if noatime:
-        options.append("noatime")
-    if inode64:
-        options.append("inode64")
-    if logdev:
-        options.append("logdev=%s" % logdev)
-    do_mount(part, mount_point, 'xfs', options)
+    def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
+        options = []
+        if noatime:
+            options.append("noatime")
+        if inode64:
+            options.append("inode64")
+        if logdev:
+            options.append("logdev=%s" % logdev)
+        Commands.do_mount(part, mount_point, 'xfs', options)
     
     @staticmethod
-def sched_tune(blockdevice, scheduler=None, tunes = {}):
-    if scheduler:
-        scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
-        stat_info = os.stat(scheduler_file)
-        if not stat.S_ISREG(stat_info.st_mode):
-            raise FioException("invalid scheduler controler: %s", scheduler_file)
-        with open(scheduler_file, "w") as f:
-            f.write(scheduler)
-    if len(tunes) > 0:
-        scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/','').replace('/', '!')
-        stat_info = os.stat(scheduler_dir)
-        if not stat.S_ISDIR(stat_info.st_mode):
-            raise FioException("invalid scheduler directory controler: %s", scheduler_dir)
-        for (tune, value) in tunes.items():
-            tune_file = '%s/%s' % (scheduler_dir, tune )
-            stat_info = os.stat(tune_file)
+    def sched_tune(blockdevice, scheduler=None, tunes = {}):
+        if scheduler:
+            scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
+            stat_info = os.stat(scheduler_file)
             if not stat.S_ISREG(stat_info.st_mode):
-                raise FioException("invalid scheduler tuner file: %s", tune_file)
-            with open(tune_file, "w") as f:                    
-                f.write("%s" % value)
+                raise FioException("invalid scheduler controler: %s", scheduler_file)
+            with open(scheduler_file, "w") as f:
+                f.write(scheduler)
+        if len(tunes) > 0:
+            scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/','').replace('/', '!')
+            stat_info = os.stat(scheduler_dir)
+            if not stat.S_ISDIR(stat_info.st_mode):
+                raise FioException("invalid scheduler directory controler: %s", scheduler_dir)
+            for (tune, value) in tunes.items():
+                tune_file = '%s/%s' % (scheduler_dir, tune )
+                stat_info = os.stat(tune_file)
+                if not stat.S_ISREG(stat_info.st_mode):
+                    raise FioException("invalid scheduler tuner file: %s", tune_file)
+                with open(tune_file, "w") as f:                    
+                    f.write("%s" % value)
 
     @staticmethod
-def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
-    # if a variable is a dict, use the label as a key to the real value
-    variables_clean ={}
-    for (key, value)  in variables.items():
-        if value.__class__ == {}.__class__:
-            variables_clean[key] = value[label]
-        else:
-            variables_clean[key] = value
-
-    flush_perms = True
-    for i in range(count):
-        libc.sync()
-        if flush_perms:
-            try:
-        drop_caches = open('/proc/sys/vm/drop_caches', 'w')
-        drop_caches.write('3')
-        drop_caches.close
-            except IOError:
-                flush_perms = False
-                print "insufficient permissions to flush caches, results might be not reproductible"
-        try:
-            if not stat.S_ISDIR(os.stat(fio_dir).st_mode):
-                raise FioException("not fio run dir: %s" % fio_dir)
-        except OSError as e:
-            if e.errno == 2 and e.filename == fio_dir:
-                os.mkdir(fio_dir)
+    def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
+        # if a variable is a dict, use the label as a key to the real value
+        variables_clean ={}
+        for (key, value)  in variables.items():
+            if value.__class__ == {}.__class__:
+                variables_clean[key] = value[label]
             else:
-                raise FioException("do_fio failed: %s", e)
-        (script_r, script_w) = os.pipe()
-        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
-        if opts:
-            fio_args.extend(opts)
-        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
-        os.close(script_r)
+                variables_clean[key] = value
+
+        flush_perms = True
+        for i in range(count):
+            libc.sync()
+            if flush_perms:
+                try:
+                    drop_caches = open('/proc/sys/vm/drop_caches', 'w')
+                    drop_caches.write('3')
+                    drop_caches.close
+                except IOError:
+                    flush_perms = False
+                    print "insufficient permissions to flush caches, results might be not reproductible"
+            try:
+                if not stat.S_ISDIR(os.stat(fio_dir).st_mode):
+                    raise FioException("not fio run dir: %s" % fio_dir)
+            except OSError as e:
+                if e.errno == 2 and e.filename == fio_dir:
+                    os.mkdir(fio_dir)
+                else:
+                    raise FioException("do_fio failed: %s", e)
+            (script_r, script_w) = os.pipe()
+            fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
+            if opts:
+                fio_args.extend(opts)
+            fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
+            os.close(script_r)
         
-        # Parse the fio script as a template
-        with open(fio_script, "r") as fio_script_file:
-            for line in fio_script_file:
-                os.write(script_w, string.Template(line).substitute(variables_clean))
-        os.close(script_w)
+            # Parse the fio script as a template
+            with open(fio_script, "r") as fio_script_file:
+                for line in fio_script_file:
+                    os.write(script_w, string.Template(line).substitute(variables_clean))
+            os.close(script_w)
         
-        fio_stdout = fio_process.communicate()[0]
-        status = fio_process.wait()
-        if status != 0:
-            raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
-        #The fio run output is clean to be parsable by a csv.reader
-        fio_stdout = fio_stdout.replace("%", "")
-        # a while because this regex will not manage two consecutive string
-        while True:
-            # wrapping all textual values with a ".."
-            (fio_stdout, count) = re.subn(r'(^|;)([^;"]*[A-Za-z=][^;"]*)(;|$)',r'\1"\2"\3',fio_stdout)
-            if count == 0:
-                break
-        try:
-            cvs_line = csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next()
-            yield (label, cvs_line)
-        except ValueError as e:
-            raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
+            fio_stdout = fio_process.communicate()[0]
+            status = fio_process.wait()
+            if status != 0:
+                raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
+            #The fio run output is clean to be parsable by a csv.reader
+            fio_stdout = fio_stdout.replace("%", "")
+            # a while because this regex will not manage two consecutive string
+            while True:
+                # wrapping all textual values with a ".."
+                (fio_stdout, count) = re.subn(r'(^|;)([^;"]*[A-Za-z=][^;"]*)(;|$)',r'\1"\2"\3',fio_stdout)
+                if count == 0:
+                    break
+            try:
+                cvs_line = csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next()
+                yield (label, cvs_line)
+            except ValueError as e:
+                raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
             
     @staticmethod
-def clean(fio_dir):
-    try:
-        for root, subFolders, files in os.walk(fio_dir, topdown=False):
-            for folder in subFolders:
-                os.rmdir(os.path.join(root,folder))
-            for onefile in files:
-                os.remove(os.path.join(root,onefile))
-    except OSError as e:
-        raise FioException("clean %s failed: %s" % (fio_dir, e))
+    def clean(fio_dir):
+        try:
+            for root, subFolders, files in os.walk(fio_dir, topdown=False):
+                for folder in subFolders:
+                    os.rmdir(os.path.join(root,folder))
+                for onefile in files:
+                    os.remove(os.path.join(root,onefile))
+        except OSError as e:
+            raise FioException("clean %s failed: %s" % (fio_dir, e))
 
 def run_script(script):
     fio_values = []
     for (f, kwargs)  in script:
         print "step %s(%s)" % (f.__name__, kwargs)
-        execute = f(**kwargs)
+        try:
+            execute = f(**kwargs)
+        except TypeError as e:
+            raise FioException("%s failed: '%s', command parameters: %s" % (f.__name__, e.message, kwargs))
         if type(execute) == type(1) and execute != 0:
             raise FioException("%s failed: %s" % (f.__name__, execute))
         elif execute is False:
@@ -295,12 +298,12 @@ def run_script(script):
                 if type(yielded) == type(()) and len(yielded) == 2:
                     row = [ yielded[0] ]
                     if len(yielded[1]) > 120:
-                    row.append(yielded[1][6])
-                    row.append(yielded[1][7])
-                    row.append(yielded[1][47])
-                    row.append(yielded[1][48])
-                    row.extend(yielded[1][109:120])
-                    fio_values.append(row)
+                        row.append(yielded[1][6])
+                        row.append(yielded[1][7])
+                        row.append(yielded[1][47])
+                        row.append(yielded[1][48])
+                        row.extend(yielded[1][109:120])
+                        fio_values.append(row)
                     else:
                         raise FioException("invalid fio stat line: %s", yielded[1])
     return fio_values
@@ -447,9 +450,9 @@ def read_csv(filename):
 
 def read_yaml(filename, defaults, variables, skip):
     try:
-    yaml_file = open(filename)
-    script_yaml = yaml.safe_load(yaml_file)
-    yaml_file.close()
+        yaml_file = open(filename)
+        script_yaml = yaml.safe_load(yaml_file)
+        yaml_file.close()
     except yaml.parser.ParserError as e:
         print "invalid file %s:" % filename
         print e
@@ -467,43 +470,42 @@ def read_yaml(filename, defaults, variables, skip):
     fio_values = run_yaml(script_yaml, skip)
     print fio_values
     if len(fio_values) > 0:
-    if('csv' in script_yaml):
-        save_csv(fio_values, **script_yaml['csv'])
-    plot(fio_values, **script_yaml['plot'])
+        if('csv' in script_yaml):
+            save_csv(fio_values, **script_yaml['csv'])
+        plot(fio_values, **script_yaml['plot'])
 
 def main(argv=None):
+    parser = OptionParser()
+    parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
+    parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
+    parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
+    parser.add_option("-s", "--skip", action="store", dest="skip", default=0, type="int")
+
+    (options, args) = parser.parse_args()
+
+    defaults = {}
+    for default in options.defaults:
+        (key, value) = default.split("=")
+        if key == 'count':
+            value = int(value)
+        defaults[key] = value
     
-parser = OptionParser()
-parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
-parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
-parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
-parser.add_option("-s", "--skip", action="store", dest="skip", default=0, type="int")
+    variables = {}
+    for default in options.variables:
+        (key, value) = default.split("=")
+        variables[key] = value
 
-(options, args) = parser.parse_args()
+    for file_use in args:
+        fileName, fileExtension = os.path.splitext(file_use)
 
-defaults = {}
-for default in options.defaults:
-    (key, value) = default.split("=")
-    if key == 'count':
-        value = int(value)
-    defaults[key] = value
-    
-variables = {}
-for default in options.variables:
-    (key, value) = default.split("=")
-    variables[key] = value
-
-for file_use in args:
-    fileName, fileExtension = os.path.splitext(file_use)
-
-    if fileExtension == '.csv':
-        read_csv(file_use)
-    else:
-       try:
-        read_yaml(file_use, defaults, variables, options.skip)
-       except FioException as e:
-           print e
-           break
+        if fileExtension == '.csv':
+            read_csv(file_use)
+        else:
+           try:
+               read_yaml(file_use, defaults, variables, options.skip)
+           except FioException as e:
+               print e
+               break
 
 solver = {}
 for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
