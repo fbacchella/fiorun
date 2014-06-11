@@ -486,7 +486,7 @@ def read_yaml(filename, defaults, variables, skip):
         plot(fio_values, **script_yaml['plot'])
 
 def main(argv=None):
-    parser = OptionParser()
+    parser = OptionParser(usage="usage: %prog [options] yaml_script+")
     parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
     parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
     parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
@@ -505,6 +505,10 @@ def main(argv=None):
     for default in options.variables:
         (key, value) = default.split("=")
         variables[key] = value
+
+    if len(args) == 0:
+        parser.print_usage()
+        exit(1)
 
     for file_use in args:
         fileName, fileExtension = os.path.splitext(file_use)
