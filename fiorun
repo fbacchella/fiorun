@@ -267,12 +267,21 @@ class Commands(object):
             status = fio_process.wait()
             if status != 0:
                 raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
-            #The fio run output is clean to be parsable by a csv.reader
+            # The fio run output is cleaned to be parsable by a csv.reader
+            # don't parse error line, display them
+            for found in re.compile(r'^(\d+;fio-.*)?(.*)$', re.MULTILINE).findall(fio_stdout):
+                if len(found[0]) > 0:
+                    fio_stdout = found[0]
+                    break
+                elif len(found[1]) > 0:
+                    print found[1]
             fio_stdout = fio_stdout.replace("%", "")
+
             # a while because this regex will not manage two consecutive string
+            quote_string = re.compile(r'(^|;)([^;"\n]*[A-Za-z=][^;"\n]*)(;|$)')
             while True:
                 # wrapping all textual values with a ".."
-                (fio_stdout, count) = re.subn(r'(^|;)([^;"]*[A-Za-z=][^;"]*)(;|$)',r'\1"\2"\3',fio_stdout)
+                (fio_stdout, count) = quote_string.subn(r'\1"\2"\3', fio_stdout)
                 if count == 0:
                     break
             try:
