@@ -8,6 +8,7 @@ from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import FuncFormatter
 import numpy
 import os
+import os.path
 import re
 import stat
 import string
@@ -223,6 +224,8 @@ class Commands(object):
 
     @staticmethod
     def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
+        check_executable(fio)
+
         # if a variable is a dict, use the label as a key to the real value
         variables_clean ={}
         for (key, value)  in variables.items():
@@ -468,6 +471,18 @@ def read_csv(filename):
                 values.append(row)
     plot(values, mode="bw", filename="/tmp/my.png")
 
+def check_executable(filename):
+    if filename:
+        try:
+            file_stat = os.stat(filename)[stat.ST_MODE]
+            if not stat.S_IXUSR & file_stat:
+                raise FioException("no executable command %s" % filename)
+        except OSError as e:
+            raise FioException("no valid command path %s: %s" % (filename, e))
+    else:
+        raise FioException("no command given")
+    return True
+
 def read_yaml(filename, defaults, variables, skip):
     try:
         yaml_file = open(filename)
@@ -487,8 +502,16 @@ def read_yaml(filename, defaults, variables, skip):
     for (key,value) in variables.items():
         script_yaml['variables'][key] = value
 
+    if not 'fio' in script_yaml['defaults']:
+        import distutils.spawn
+        script_yaml['defaults']['fio'] = distutils.spawn.find_executable("fio")
+
+    #check if fio
+    fio_cmd = script_yaml['defaults'].get('fio')
+    if fio_cmd is not None and not check_executable(fio_cmd):
+        return
+
     fio_values = run_yaml(script_yaml, skip)
-    print fio_values
     if len(fio_values) > 0:
         if('csv' in script_yaml):
             save_csv(fio_values, **script_yaml['csv'])
