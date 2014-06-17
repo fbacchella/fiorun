@@ -18,7 +18,7 @@ import sys
 import time
 import yaml
 
-from optparse import OptionParser
+from optparse import OptionParser, OptionGroup
 
 try:
     import platform
@@ -485,8 +485,7 @@ def save_csv(fio_values, filename):
         for row in fio_values:
             cvsoutput.writerow([row.label] + row.values)
 
-def read_csv(filename):
-    values = []
+def read_csv(filename, values=[]):
     with open(filename, 'rb') as csvfile:
         csv_input = csv.reader(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
         for row in csv_input:
@@ -540,12 +539,22 @@ def read_yaml(filename, defaults, variables, skip):
             save_csv(fio_values, **script_yaml['csv'])
         plot(fio_values, **script_yaml['plot'])
 
-def main(argv=None):
-    parser = OptionParser(usage="usage: %prog [options] yaml_script+")
-    parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
-    parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
-    parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
-    parser.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
+def main():
+
+    parser = OptionParser(usage="\n%prog [options] yaml_script+\n%prog -c [options] csv_values+")
+
+    yaml_group = OptionGroup(parser, "Yaml script execution")
+    yaml_group.add_option("-V", "--variable", dest="variables", action="append", default = [])
+    yaml_group.add_option("-D", "--default", dest="defaults", action="append", default = [])
+    yaml_group.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
+    yaml_group.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
+    parser.add_option_group(yaml_group)
+
+    csv_group = OptionGroup(parser, "Plot from a list of csv")
+    csv_group.add_option("-c", "--csv", action="store_true", dest="csv_input", default=False)
+    csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default="iops", type="choice", choices=("bw", "iops") )
+    csv_group.add_option("-p", "--png", action="store", dest="png_output", default=None, type=type(""))
+    parser.add_option_group(csv_group)
 
     (options, args) = parser.parse_args()
 
@@ -565,18 +574,20 @@ def main(argv=None):
         parser.print_usage()
         exit(1)
 
+    if not options.csv_input:
     for file_use in args:
-        fileName, fileExtension = os.path.splitext(file_use)
-
-        if fileExtension == '.csv':
-            plot(read_csv(file_use), mode="bw", filename="/tmp/my.png")
-
-        else:
            try:
                read_yaml(file_use, defaults, variables, options.skip)
            except FioException as e:
                print e
                break
+    else:
+        values = []
+        for file_use in args:
+            values = read_csv(file_use)
+
+        plot(values, mode=options.graph_mode, filename=options.png_output)
+
 
 solver = {}
 for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
