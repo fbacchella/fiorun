@@ -127,6 +127,11 @@ Actions
 * do_mount_xfs
 
   Mount a xfs file system
+   * part (mandatory): the partition to mount
+   * mount_point (mandatory): where to mount the filesystem
+   * logdev: an optionnal log device
+   * noatime: mount with noatime, default to true
+   * inode64: use inode64, default to true
 
 * do_fio
 

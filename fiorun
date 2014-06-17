@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-
+# -*- coding: UTF-8 -*-
 import csv
 import inspect
 import math
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import FuncFormatter
+import matplotlib.cm
 import numpy
 import os
 import os.path
@@ -48,7 +49,26 @@ def check_dev(blockdevice):
     except:
         return False
 
- 
+class FioStat(object):
+
+    label      = property(lambda x: x._label, None, None, "label")
+    values     = property(lambda x: x._values, None, None, "all fio values")
+    version    = property(lambda x: x._values[0], None, None, "data version")
+    read_bw    = property(lambda x: x._values[6], None, None, "read bandwith")
+    write_bw   = property(lambda x: x._values[47], None, None, "write bandwith")
+    read_iops  = property(lambda x: x._values[7], None, None, "read iop/s")
+    write_iops = property(lambda x: x._values[48], None, None, "write iop/s")
+    # join µs to 2ms, skip 75ms and 750ms
+    latencies  = property(lambda x: [reduce(lambda x,y: x+y, x._values[99:110])] + x._values[110:117] + [reduce(lambda x,y: x+y, x._values[117:119])]+ x._values[119:120], None, None, "IO latencies")
+
+    def __init__(self, label, values):
+        if len(values) < 1:
+            raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
+        self._values = values
+        self._label = label
+        if self.version == 3 and len(values) < 120:
+            raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
+
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
 class Commands(object):
@@ -263,7 +283,10 @@ class Commands(object):
             # Parse the fio script as a template
             with open(fio_script, "r") as fio_script_file:
                 for line in fio_script_file:
-                    os.write(script_w, string.Template(line).substitute(variables_clean))
+                    try:
+                        os.write(script_w, string.Template(line).substitute(variables_clean))
+                    except KeyError as e:
+                        raise FioException("Unknown variable: %s", e)
             os.close(script_w)
         
             fio_stdout = fio_process.communicate()[0]
@@ -319,16 +342,8 @@ def run_script(script):
         elif execute.__class__.__name__ == 'generator':
             for yielded in execute:
                 if type(yielded) == type(()) and len(yielded) == 2:
-                    row = [ yielded[0] ]
-                    if len(yielded[1]) > 120:
-                        row.append(yielded[1][6])
-                        row.append(yielded[1][7])
-                        row.append(yielded[1][47])
-                        row.append(yielded[1][48])
-                        row.extend(yielded[1][109:120])
-                        fio_values.append(row)
-                    else:
-                        raise FioException("invalid fio stat line: %s", yielded[1])
+                    fio_values.append(FioStat(yielded[0], yielded[1]))
+
     return fio_values
 
 def run_yaml(script_yaml,skip):
@@ -358,13 +373,13 @@ def run_yaml(script_yaml,skip):
                 kwargs[arg_name] = script_yaml['defaults'][arg_name]
         # not all arguments from the yaml file used, something is wrong
         if len(cmd_args) > 0:
-            raise Exception("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
+            raise FioException("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
         script.append((cmd_func, kwargs))
 
     return run_script(script)
 
 def plot(fio_values, mode="bw", filename=None):
-    column_labels = [ "<=2", "4", "10", "20", "50", "100", "250", "500", "750", "1000", "2000", ">=2000" ]
+    column_labels = [ "<=2", "4", "10", "20", "50", "100", "250", "500", "1000", "2000", ">=2000" ]
     
     row_labels = []
     ms_values = []
@@ -373,25 +388,38 @@ def plot(fio_values, mode="bw", filename=None):
     iops_values_read = []
     iops_values_write = []
     for row in fio_values:
-        row_labels.append(row[0])
-        bw_values_read.append(row[1])
-        iops_values_read.append(row[2])
-        bw_values_write.append(row[3])
-        iops_values_write.append(row[4])
-        ms_values.append(row[5:])
-        
+        row_labels.append(row.label)
+        bw_values_read.append(row.read_bw)
+        iops_values_read.append(row.read_iops)
+        bw_values_write.append(row.write_bw)
+        iops_values_write.append(row.write_iops)
+        ms_values.append(row.latencies)
+
+    x = numpy.arange(len(ms_values))
+    y = numpy.arange(len(ms_values[0]))
+    X, Y = numpy.meshgrid(x, y)
+
     waitarray = numpy.array(ms_values).transpose()
+    maxwait = numpy.amax(ms_values)
+    normalized = waitarray/maxwait * 1000
+
     fig = Figure(subplotpars=SubplotParams(right=0.85, left=0.07))
-    ax1 = fig.add_subplot(1,1,1)
-    # put the major ticks at the middle of each cell, notice "reverse" use of dimension
-    ax1.set_xticks(numpy.arange(waitarray.shape[1])+0.5, minor=False)
+    ax1 = fig.add_subplot(1, 1, 1)
+
+    ax1.set_xticks(numpy.arange(len(row_labels)), minor=False)
     ax1.set_xticklabels(row_labels, minor=False)
+
     ax2 = ax1.twinx()
-    
-    # draw the heatmap
+
+    # draw the latencies circles
+    ax1.scatter(X.ravel(), Y.ravel(), c=Y, s=normalized.ravel(), alpha=0.5, cmap="jet")
+
+    ax1.set_xlim(-0.5, len(row_labels) - 0.5)
+
+    ax1.set_ylim(bottom=-1)
+    ax1.set_yticks(range(len(column_labels)))
     ax1.set_yticklabels(column_labels, minor=False)
-    ax1.pcolor(waitarray, cmap='bone_r')
-    
+
     # Draw the bw or io/s line
     if mode == "bw":
         to_plot_read = bw_values_read
@@ -405,13 +433,11 @@ def plot(fio_values, mode="bw", filename=None):
         ylabel = 'io/s'
         radix = 1000
         base = 10
-        
-    magnitude_symbols = ["M", "G", "T"]
+
     # pop start from the end
+    magnitude_symbols = ["M", "G", "T"]
     magnitude_symbols.reverse()
-    min_plot = min(numpy.amin(to_plot_read), numpy.amin(to_plot_write))
-    if min_plot != 0:
-        min_plot = math.pow(base, math.floor(math.log(min_plot, base)))
+
     max_plot = max(numpy.amax(to_plot_read), numpy.amax(to_plot_write))
     if max_plot != 0:
         max_plot = math.pow(base, math.ceil(math.log(max_plot, base)))
@@ -427,40 +453,37 @@ def plot(fio_values, mode="bw", filename=None):
     if radix == 1024 and symbol:
         symbol += 'i'
 
-    x = numpy.linspace(0.5, len(row_labels) - 0.5, len(row_labels))
     ax2.set_ylabel(ylabel, color='b')
     for tl in ax2.get_yticklabels():
         tl.set_color('b')
-    formatter = FuncFormatter(lambda x,y: '%1.0f %s' % (x / factor, symbol))
+    formatter = FuncFormatter(lambda x,y: '%1.1f %s' % (x / factor, symbol))
     ax2.yaxis.set_major_formatter(formatter)
-    #ax2.set_ylim(min_plot, max_plot)
     ax2.plot(x, to_plot_read, 'b.-')
-    ax2.plot(x, to_plot_write, 'b+-')
-    #(y_min, y_max) = ax2.get_ylim()
-    #print (y_min, y_max)
-    #y_min = math.pow(2 , math.floor(math.log(y_min, 2 )))
-    #y_max = math.pow(2 , math.ceil(math.log(y_max, 2)))
-    #print (y_min, y_max) 
-    #ax2.set_ylim(y_min, y_max)
-    #yticks = []
-    #for i in range(base):
-    #    yticks.append(1.0 * (i/base) * (y_max - y_min) + y_min)
-    #ax2.set_yticks(yticks, minor=False)
-    
+    ax2.plot(x, to_plot_write, 'g+-')
+
+    plot_array = numpy.array(to_plot_read + to_plot_write)
+
+    y_max = plot_array.max()
+    y_max_new = math.pow(2 , math.ceil(math.log(y_max, 2)))
+    ax2.set_ylim(0, y_max_new * 1.2)
+    yticks = map(lambda x: (1.0 * x/base) * y_max_new, range(base))
+    ax2.set_yticks(yticks, minor=False)
+
     if filename:
         canvas = FigureCanvasBase(fig)
         canvas.print_figure(filename)
     else:
         # import only when needed, it uses X11
         import matplotlib.pyplot
-        matplotlib.pyplot.show()
+        matplotlib.pyplot.show(fig)
+
 
 def save_csv(fio_values, filename):
     with open(filename, 'wb') as csvfile:
         cvsoutput = csv.writer(csvfile, delimiter=',',
                                 quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
         for row in fio_values:
-            cvsoutput.writerow(row)
+            cvsoutput.writerow([row.label] + row.values)
 
 def read_csv(filename):
     values = []
@@ -468,8 +491,8 @@ def read_csv(filename):
         csv_input = csv.reader(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
         for row in csv_input:
             if row:
-                values.append(row)
-    plot(values, mode="bw", filename="/tmp/my.png")
+                values.append(FioStat(row[0], row[1:]))
+    return values
 
 def check_executable(filename):
     if filename:
@@ -522,7 +545,7 @@ def main(argv=None):
     parser.add_option("-V", "--variable", dest="variables", action="append", default = [])
     parser.add_option("-D", "--default", dest="defaults", action="append", default = [])
     parser.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
-    parser.add_option("-s", "--skip", action="store", dest="skip", default=0, type="int")
+    parser.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
 
     (options, args) = parser.parse_args()
 
@@ -546,7 +569,8 @@ def main(argv=None):
         fileName, fileExtension = os.path.splitext(file_use)
 
         if fileExtension == '.csv':
-            read_csv(file_use)
+            plot(read_csv(file_use), mode="bw", filename="/tmp/my.png")
+
         else:
            try:
                read_yaml(file_use, defaults, variables, options.skip)
