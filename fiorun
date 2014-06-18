@@ -124,7 +124,7 @@ class Commands(object):
                     if mount_info.strip() == 'None':
                         continue
                     mount_point = mount_info.strip().split(' ')[0]
-                    Commands.smart_unmount(path=mount_point)
+                    Commands.do_unmount(mount_point=mount_point)
                 hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)
                 status = hpacuclip.wait()
                 if status != 0:
@@ -134,8 +134,8 @@ class Commands(object):
         return hpacuclip.wait()
 
     @staticmethod
-    def smart_unmount(path=None, part=None, blockdevice=None):
-        if blockdevice:
+    def do_unmount(mount_point=None, part=None, blockdevice=None):
+        if blockdevice is not None:
             if not check_dev(blockdevice):
                 return True
             # substitution needed because of cciss/cXdX with HP's Smart Arrays
@@ -143,31 +143,31 @@ class Commands(object):
             os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
             for d in filter( lambda x: stat.S_ISDIR(os.stat(x).st_mode ) and os.path.exists("%s/dev" % x),
                              os.listdir('.')):
-                if Commands.smart_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
+                if Commands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
                     os.chdir(old_path)
                     return False
             os.chdir(old_path)
             return 0
-        if part:
+        if part is not None:
             proc_mount = open('/proc/mounts', 'r')
             for l in proc_mount.readlines():
                 mounted = l.split(" ")
                 if mounted[0] == part:
-                    path = mounted[1]
+                    mount_point = mounted[1]
                     break
-        if not path or not os.path.isdir('path'):
+        if not mount_point or not os.path.isdir(mount_point):
             return
         old_path = os.getcwdu()
-        os.chdir(path)
+        os.chdir(mount_point)
         benchdir = os.stat(".")
         updir = os.stat("..")
         os.chdir(old_path)
         if benchdir.st_dev != updir.st_dev:
-            return subprocess.Popen(["umount", path]).wait()
+            return subprocess.Popen(["umount", mount_point]).wait()
 
     @staticmethod
     def do_part(blockdevice, stripsize=0, stripcount=0):
-        Commands.smart_unmount(blockdevice=blockdevice)
+        Commands.do_unmount(blockdevice=blockdevice)
         sfdisk_args = ["sfdisk", "-L" ]
         if stripsize != 0 and stripcount != 0:
             while stripsize * 2 > 63:
@@ -185,7 +185,7 @@ class Commands(object):
 
     @staticmethod
     def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
-        Commands.smart_unmount(part=part)
+        Commands.do_unmount(part=part)
         if not check_dev(part):
             return False
         if logdev and not check_dev(logdev):
@@ -200,7 +200,7 @@ class Commands(object):
 
     @staticmethod
     def do_mount(part, mount_point, fs_type, options = []):
-        Commands.smart_unmount(path=mount_point)
+        Commands.do_unmount(mount_point=mount_point)
         sync()
         if not os.path.isdir(mount_point):
             if not os.path.exists(mount_point):

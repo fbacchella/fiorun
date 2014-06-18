@@ -124,6 +124,14 @@ Actions
    * fs_type (mandatory): the file system type to mount
    * options: the options to use for the mount
 
+* do_umount
+
+  Try to unmount a file system, don't fail if it's not mounted. Any one of the three arguments needs to be provided
+  
+   * mount_point : where the filesystem is mounted
+   * part: the partition's block device
+   * blockdevice: a block device to remove all partitions from
+  
 * do_mount_xfs
 
   Mount a xfs file system
