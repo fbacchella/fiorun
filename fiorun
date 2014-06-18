@@ -76,6 +76,8 @@ class Commands(object):
 
     @staticmethod
     def modify_cciss(object, command, hpacucli, slot=None, ld=None):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
         sync()
         identity = []
         identity.extend(["ctrl", "slot=%s" % slot])
@@ -90,6 +92,8 @@ class Commands(object):
         
     @staticmethod
     def get_cciss_info(slot, ld, hpacucli):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
         sync()
         check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
         output = check_ld.communicate()[0]
@@ -104,6 +108,8 @@ class Commands(object):
 
     @staticmethod
     def wait_cciss_ld(slot, ld, hpacucli):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
         while True:
             ld_info = Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
             if not "Parity Initialization Status" in ld_info:
@@ -116,6 +122,8 @@ class Commands(object):
 
     @staticmethod
     def do_cciss_ld(slot, ld, raid, hpacucli, stripsize=None):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
         ld_info =  Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
         if 'Disk Name' in ld_info:
             blockdevice = ld_info['Disk Name']
@@ -545,7 +553,12 @@ def read_yaml(filename, defaults, variables, skip):
 
     # check the executable path
     script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults']['fio'])
+    # hpacucli is not mandatory, don't failed on it
+    try:
     script_yaml['defaults']['hpacucli'] = check_executable(script_yaml['defaults']['hpacucli'])
+    except FioException as e:
+        # keep it, will be thrown when needed
+        script_yaml['defaults']['hpacucli'] = e
 
     #check if fio
     fio_cmd = script_yaml['defaults'].get('fio')
