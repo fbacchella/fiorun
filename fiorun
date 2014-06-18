@@ -202,6 +202,11 @@ class Commands(object):
     def do_mount(part, mount_point, fs_type, options = []):
         Commands.smart_unmount(path=mount_point)
         sync()
+        if not os.path.isdir(mount_point):
+            if not os.path.exists(mount_point):
+                os.mkdir(mount_point)
+            else:
+                raise FioException("mount point %s is not a directory" % mount_point)
         mount_args = ["mount", "-t", fs_type]
         if len(options) > 0:
             mount_args.append("-o")
@@ -219,7 +224,7 @@ class Commands(object):
             options.append("inode64")
         if logdev:
             options.append("logdev=%s" % logdev)
-        Commands.do_mount(part, mount_point, 'xfs', options)
+        return Commands.do_mount(part, mount_point, 'xfs', options)
     
     @staticmethod
     def sched_tune(blockdevice, scheduler=None, tunes = {}):
