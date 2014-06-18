@@ -188,3 +188,11 @@ For example, by adding the following section to the yaml file:
             C: "4G"
 
 The do_fio commands with label A, B, C will run the fio script with subtituting the variable ${size} with the respective value "1G", "2G", "4G"
+
+Variables
+=========
+
+fiorun can run many yaml scripts. If a template is provided in command line, default values for each sections will be used.
+Then each yaml script can be reduced to a bare minimum.
+
+Sections 'defaults', 'variables', 'plot', 'csv' are merged. Section 'run' is totally replaced.

@@ -531,7 +531,7 @@ def check_executable(filename):
         raise FioException("command '%s' not found in path" % filename)
     return filename_path
 
-def read_yaml(filename, defaults, variables, skip):
+def read_yaml(filename, template, defaults, variables, skip):
     try:
         yaml_file = open(filename)
         script_yaml = yaml.safe_load(yaml_file)
@@ -540,6 +540,20 @@ def read_yaml(filename, defaults, variables, skip):
         print "invalid file %s:" % filename
         print e
         return
+
+    #####
+    # Merge the template and the file
+    if template is not None:
+        #Run is over written
+        if script_yaml.get('run') is None and template.get('run') is not None:
+            script_yaml['run'] = template['run']
+        # other sections are merged
+        for section in ('defaults', 'variables', 'plot', 'csv'):
+            if section in template:
+                for (key,value) in template[section].items():
+                    if key not in script_yaml[section]:
+                        script_yaml[section][key] = value
+
     if not 'defaults' in script_yaml:
         script_yaml['defaults'] = {}
     for (key,value) in defaults.items():
@@ -560,11 +574,6 @@ def read_yaml(filename, defaults, variables, skip):
         # keep it, will be thrown when needed
         script_yaml['defaults']['hpacucli'] = e
 
-    #check if fio
-    fio_cmd = script_yaml['defaults'].get('fio')
-    if fio_cmd is not None and not check_executable(fio_cmd):
-        return
-
     fio_values = run_yaml(script_yaml, skip)
     if len(fio_values) > 0:
         if('csv' in script_yaml):
@@ -580,6 +589,8 @@ def main():
     yaml_group.add_option("-D", "--default", dest="defaults", action="append", default = [])
     yaml_group.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
     yaml_group.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
+    yaml_group.add_option("-t", "--template", action="store", dest="template", default=None)
+
     parser.add_option_group(yaml_group)
 
     csv_group = OptionGroup(parser, "Plot from a list of csv")
@@ -589,6 +600,18 @@ def main():
     parser.add_option_group(csv_group)
 
     (options, args) = parser.parse_args()
+
+    if options.template is not None:
+        try:
+            yaml_file = open(options.template)
+            template = yaml.safe_load(yaml_file)
+            yaml_file.close()
+        except yaml.parser.ParserError as e:
+            print "invalid yaml template %s:" % options.template
+            print e
+            return
+    else:
+        template = None
 
     defaults = { 'fio': 'fio', 'hpacucli': 'hpacucli'}
     for default in options.defaults:
@@ -609,7 +632,7 @@ def main():
     if not options.csv_input:
     for file_use in args:
            try:
-               read_yaml(file_use, defaults, variables, options.skip)
+                read_yaml(file_use, template, defaults, variables, options.skip)
            except FioException as e:
                print e
                break
