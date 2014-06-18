@@ -164,6 +164,12 @@ Actions
 
    * dir (mandatory): the directory to clean
 
+* mkpath
+
+  Create a directory, make parent directories as needed.
+
+   * dir (mandatory): the directory to create
+
 Variables
 =========
 

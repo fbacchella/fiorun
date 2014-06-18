@@ -324,6 +324,25 @@ class Commands(object):
         except OSError as e:
             raise FioException("clean %s failed: %s" % (dir, e))
 
+    @staticmethod
+    def mkpath(dir):
+        old_path = os.getcwdu()
+        os.chdir(os.path.sep)
+        for step in dir.split(os.path.sep)[1:]:
+            try:
+                if not stat.S_ISDIR(os.stat(step).st_mode):
+                    raise FioException("a element of path is not a directory: %s%s%s" % (os.getcwdu(), os.path.sep, step))
+            except OSError as e:
+                if e.errno == 2 and e.filename == step:
+                    try:
+                        os.mkdir(step)
+                    except OSError as e:
+                        raise FioException("cant create directory %s%s%s: %s" % (os.getcwdu(), os.path.sep, step, e))
+                else:
+                    raise FioException("cant create directory %s%s%s: s" % (os.getcwdu(), os.path.sep, step, e))
+            os.chdir(step)
+        os.chdir(old_path)
+
 def run_script(script):
     fio_values = []
     for (f, kwargs)  in script:
