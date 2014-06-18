@@ -19,6 +19,7 @@ import time
 import yaml
 
 from optparse import OptionParser, OptionGroup
+from distutils import spawn
 
 try:
     import platform
@@ -74,21 +75,21 @@ class FioStat(object):
 class Commands(object):
 
     @staticmethod
-    def modify_cciss(object, command, slot=None, ld=None):
+    def modify_cciss(object, command, hpacucli, slot=None, ld=None):
         sync()
         identity = []
         identity.extend(["ctrl", "slot=%s" % slot])
         if object == "ld":
             identity.extend(["ld", "%s" % ld])
-        cciss_args = ["/usr/sbin/hpacucli"]
+        cciss_args = [ check_executable(hpacucli)]
         cciss_args.extend(identity)
         cciss_args.append("modify")
         cciss_args.extend(command.split(" "))
-        hpacucli = subprocess.Popen(cciss_args, stdin=None)
-        return hpacucli.wait()
+        hpacuclip = subprocess.Popen(cciss_args, stdin=None)
+        return hpacuclip.wait()
         
     @staticmethod
-    def get_cciss_info(slot, ld, hpacucli="/usr/sbin/hpacucli"):
+    def get_cciss_info(slot, ld, hpacucli):
         sync()
         check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
         output = check_ld.communicate()[0]
@@ -102,9 +103,9 @@ class Commands(object):
         return values
 
     @staticmethod
-    def wait_cciss_ld(slot, ld):
+    def wait_cciss_ld(slot, ld, hpacucli):
         while True:
-            ld_info = Commands.get_cciss_info(slot=slot, ld=ld)
+            ld_info = Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
             if not "Parity Initialization Status" in ld_info:
                 return
             if ld_info["Parity Initialization Status"] == "Initialization Completed":
@@ -114,8 +115,8 @@ class Commands(object):
             time.sleep(30)
 
     @staticmethod
-    def do_cciss_ld(slot, ld, raid, stripsize=None, hpacucli="/usr/sbin/hpacucli"):
-        ld_info =  Commands.get_cciss_info(slot=slot, ld=ld)
+    def do_cciss_ld(slot, ld, raid, hpacucli, stripsize=None):
+        ld_info =  Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
         if 'Disk Name' in ld_info:
             blockdevice = ld_info['Disk Name']
             if check_dev(blockdevice):
@@ -124,13 +125,13 @@ class Commands(object):
                         continue
                     mount_point = mount_info.strip().split(' ')[0]
                     Commands.smart_unmount(path=mount_point)
-                hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)	
-                status = hpacucli.wait()
+                hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)
+                status = hpacuclip.wait()
                 if status != 0:
                     raise FioException("hpacucli failed with status %s", status)
             sync()
-        hpacucli = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
-        return hpacucli.wait()
+        hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
+        return hpacuclip.wait()
 
     @staticmethod
     def smart_unmount(path=None, part=None, blockdevice=None):
@@ -154,7 +155,7 @@ class Commands(object):
                 if mounted[0] == part:
                     path = mounted[1]
                     break
-        if not path:
+        if not path or not os.path.isdir('path'):
             return
         old_path = os.getcwdu()
         os.chdir(path)
@@ -334,7 +335,7 @@ def run_script(script):
         try:
             execute = f(**kwargs)
         except TypeError as e:
-            raise FioException("%s failed: '%s', command parameters: %s" % (f.__name__, e.message, kwargs))
+            raise FioException("%s failed: '%s', command parameters: %s" % (f.__name__, e, kwargs))
         if type(execute) == type(1) and execute != 0:
             raise FioException("%s failed: %s" % (f.__name__, execute))
         elif execute is False:
@@ -494,16 +495,18 @@ def read_csv(filename, values=[]):
     return values
 
 def check_executable(filename):
-    if filename:
-        try:
-            file_stat = os.stat(filename)[stat.ST_MODE]
-            if not stat.S_IXUSR & file_stat:
-                raise FioException("no executable command %s" % filename)
-        except OSError as e:
-            raise FioException("no valid command path %s: %s" % (filename, e))
-    else:
+    if filename is None:
         raise FioException("no command given")
-    return True
+    filename_path = spawn.find_executable(filename)
+    if filename_path is not None:
+        try:
+            if not os.access(filename_path,  os.X_OK):
+                raise FioException("no executable command '%s'" % filename_path)
+        except OSError as e:
+            raise FioException("no valid command path '%s': '%s'" % (filename_path, e))
+    else:
+        raise FioException("command '%s' not found in path" % filename)
+    return filename_path
 
 def read_yaml(filename, defaults, variables, skip):
     try:
@@ -517,6 +520,7 @@ def read_yaml(filename, defaults, variables, skip):
     if not 'defaults' in script_yaml:
         script_yaml['defaults'] = {}
     for (key,value) in defaults.items():
+        if not key in script_yaml['defaults']:
         script_yaml['defaults'][key] = value
         
     if not 'variables' in script_yaml:
@@ -524,9 +528,9 @@ def read_yaml(filename, defaults, variables, skip):
     for (key,value) in variables.items():
         script_yaml['variables'][key] = value
 
-    if not 'fio' in script_yaml['defaults']:
-        import distutils.spawn
-        script_yaml['defaults']['fio'] = distutils.spawn.find_executable("fio")
+    # check the executable path
+    script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults']['fio'])
+    script_yaml['defaults']['hpacucli'] = check_executable(script_yaml['defaults']['hpacucli'])
 
     #check if fio
     fio_cmd = script_yaml['defaults'].get('fio')
@@ -558,7 +562,7 @@ def main():
 
     (options, args) = parser.parse_args()
 
-    defaults = {}
+    defaults = { 'fio': 'fio', 'hpacucli': 'hpacucli'}
     for default in options.defaults:
         (key, value) = default.split("=")
         if key == 'count':
