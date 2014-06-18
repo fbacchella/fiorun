@@ -147,7 +147,6 @@ Actions
 
    * label (mandatory): a string to identify the run
    * fio_script (mandatory): the fio script to run
-   * fio_dir (mandatory): the fio work dir
    * fio: the path to the fio command
    * count: the number of fio run
 
@@ -163,7 +162,7 @@ Actions
 
   Clean the run directory
 
-   * fio_dir (mandatory): the directory to clean
+   * dir (mandatory): the directory to clean
 
 Variables
 =========

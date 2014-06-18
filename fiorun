@@ -249,8 +249,7 @@ class Commands(object):
                     f.write("%s" % value)
 
     @staticmethod
-    def do_fio(label, fio_script, fio_dir, fio = "fio", opts = None, count = 1, variables = {}):
-        check_executable(fio)
+    def do_fio(label, fio_script, fio, opts = None, count = 1, variables = {}):
 
         # if a variable is a dict, use the label as a key to the real value
         variables_clean ={}
@@ -271,14 +270,6 @@ class Commands(object):
                 except IOError:
                     flush_perms = False
                     print "insufficient permissions to flush caches, results might be not reproductible"
-            try:
-                if not stat.S_ISDIR(os.stat(fio_dir).st_mode):
-                    raise FioException("not fio run dir: %s" % fio_dir)
-            except OSError as e:
-                if e.errno == 2 and e.filename == fio_dir:
-                    os.mkdir(fio_dir)
-                else:
-                    raise FioException("do_fio failed: %s", e)
             (script_r, script_w) = os.pipe()
             fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
             if opts:
@@ -323,15 +314,15 @@ class Commands(object):
                 raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
             
     @staticmethod
-    def clean(fio_dir):
+    def clean(dir):
         try:
-            for root, subFolders, files in os.walk(fio_dir, topdown=False):
+            for root, subFolders, files in os.walk(dir, topdown=False):
                 for folder in subFolders:
                     os.rmdir(os.path.join(root,folder))
                 for onefile in files:
                     os.remove(os.path.join(root,onefile))
         except OSError as e:
-            raise FioException("clean %s failed: %s" % (fio_dir, e))
+            raise FioException("clean %s failed: %s" % (dir, e))
 
 def run_script(script):
     fio_values = []
