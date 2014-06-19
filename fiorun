@@ -550,6 +550,8 @@ def read_yaml(filename, template, defaults, variables, skip):
         # other sections are merged
         for section in ('defaults', 'variables', 'plot', 'csv'):
             if section in template:
+                if section not in script_yaml:
+                    script_yaml[section] = {}
                 for (key,value) in template[section].items():
                     if key not in script_yaml[section]:
                         script_yaml[section][key] = value
