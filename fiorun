@@ -50,6 +50,17 @@ def check_dev(blockdevice):
     except:
         return False
 
+# Define the register command decorator
+stepsfuncs = {}
+def step(func, *args, **kwargs):
+    stepsfuncs[func.__name__] = func
+    return func
+
+checkscriptfunc = []
+def checkscript(func, *args, **kwargs):
+    checkscriptfunc.append(func)
+    return func
+
 class FioStat(object):
 
     label      = property(lambda x: x._label, None, None, "label")
@@ -72,9 +83,20 @@ class FioStat(object):
 
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
-class Commands(object):
+class CcissSteps(object):
 
     @staticmethod
+    @checkscript
+    def check_cciss(script_yaml):
+        # hpacucli is not mandatory, don't failed on it
+        try:
+            script_yaml['defaults']['hpacucli'] = check_executable(script_yaml['defaults'].get('hpacucli', 'hpacucli'))
+        except FioException as e:
+            # keep it, will be thrown when needed
+            script_yaml['defaults']['hpacucli'] = e
+
+    @staticmethod
+    @step
     def modify_cciss(object, command, hpacucli, slot=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
@@ -91,6 +113,7 @@ class Commands(object):
         return hpacuclip.wait()
         
     @staticmethod
+    @step
     def get_cciss_info(slot, ld, hpacucli):
         if isinstance(hpacucli, FioException):
             raise hpacucli
@@ -107,11 +130,12 @@ class Commands(object):
         return values
 
     @staticmethod
+    @step
     def wait_cciss_ld(slot, ld, hpacucli):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         while True:
-            ld_info = Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
+            ld_info = CcissSteps.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
             if not "Parity Initialization Status" in ld_info:
                 return
             if ld_info["Parity Initialization Status"] == "Initialization Completed":
@@ -121,10 +145,11 @@ class Commands(object):
             time.sleep(30)
 
     @staticmethod
+    @step
     def do_cciss_ld(slot, ld, raid, hpacucli, stripsize=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
-        ld_info =  Commands.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
+        ld_info =  CcissSteps.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
         if 'Disk Name' in ld_info:
             blockdevice = ld_info['Disk Name']
             if check_dev(blockdevice):
@@ -132,7 +157,7 @@ class Commands(object):
                     if mount_info.strip() == 'None':
                         continue
                     mount_point = mount_info.strip().split(' ')[0]
-                    Commands.do_unmount(mount_point=mount_point)
+                    CommonCommands.do_unmount(mount_point=mount_point)
                 hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)
                 status = hpacuclip.wait()
                 if status != 0:
@@ -141,7 +166,17 @@ class Commands(object):
         hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
         return hpacuclip.wait()
 
+# A class used as a container for command
+# To add a new command, just add a staticmethod to this class
+class CommonCommands(object):
+
     @staticmethod
+    @checkscript
+    def check_fio(script_yaml):
+        script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults'].get('fio', 'fio'))
+
+    @staticmethod
+    @step
     def do_unmount(mount_point=None, part=None, blockdevice=None):
         if blockdevice is not None:
             if not check_dev(blockdevice):
@@ -151,7 +186,7 @@ class Commands(object):
             os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
             for d in filter( lambda x: stat.S_ISDIR(os.stat(x).st_mode ) and os.path.exists("%s/dev" % x),
                              os.listdir('.')):
-                if Commands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
+                if CommonCommands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
                     os.chdir(old_path)
                     return False
             os.chdir(old_path)
@@ -174,8 +209,9 @@ class Commands(object):
             return subprocess.Popen(["umount", mount_point]).wait()
 
     @staticmethod
+    @step
     def do_part(blockdevice, stripsize=0, stripcount=0):
-        Commands.do_unmount(blockdevice=blockdevice)
+        CommonCommands.do_unmount(blockdevice=blockdevice)
         sfdisk_args = ["sfdisk", "-L" ]
         if stripsize != 0 and stripcount != 0:
             while stripsize * 2 > 63:
@@ -192,8 +228,9 @@ class Commands(object):
             return False
 
     @staticmethod
+    @step
     def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
-        Commands.do_unmount(part=part)
+        CommonCommands.do_unmount(part=part)
         if not check_dev(part):
             return False
         if logdev and not check_dev(logdev):
@@ -207,8 +244,9 @@ class Commands(object):
         return subprocess.Popen(mkfs_args).wait()
 
     @staticmethod
+    @step
     def do_mount(part, mount_point, fs_type, options = []):
-        Commands.do_unmount(mount_point=mount_point)
+        CommonCommands.do_unmount(mount_point=mount_point)
         sync()
         if not os.path.isdir(mount_point):
             if not os.path.exists(mount_point):
@@ -224,6 +262,7 @@ class Commands(object):
         return subprocess.Popen(mount_args).wait()
 
     @staticmethod
+    @step
     def do_mount_xfs(part, mount_point, logdev=None, noatime=True, inode64=True):
         options = []
         if noatime:
@@ -232,9 +271,10 @@ class Commands(object):
             options.append("inode64")
         if logdev:
             options.append("logdev=%s" % logdev)
-        return Commands.do_mount(part, mount_point, 'xfs', options)
+        return CommonCommands.do_mount(part, mount_point, 'xfs', options)
     
     @staticmethod
+    @step
     def sched_tune(blockdevice, scheduler=None, tunes = {}):
         if scheduler:
             scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
@@ -257,6 +297,7 @@ class Commands(object):
                     f.write("%s" % value)
 
     @staticmethod
+    @step
     def do_fio(label, fio_script, fio, opts = None, count = 1, variables = {}):
 
         # if a variable is a dict, use the label as a key to the real value
@@ -322,6 +363,7 @@ class Commands(object):
                 raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
             
     @staticmethod
+    @step
     def clean(dir):
         try:
             for root, subFolders, files in os.walk(dir, topdown=False):
@@ -333,6 +375,7 @@ class Commands(object):
             raise FioException("clean %s failed: %s" % (dir, e))
 
     @staticmethod
+    @step
     def mkpath(dir):
         old_path = os.getcwdu()
         os.chdir(os.path.sep)
@@ -381,9 +424,9 @@ def run_yaml(script_yaml,skip):
         cmd_args = cmd[cmd_name]
         if cmd_args == None:
             cmd_args = {}
-        if cmd_name not in solver:
+        if cmd_name not in stepsfuncs:
             print "unknown %s" % cmd_name
-        cmd_func = solver[cmd_name]
+        cmd_func = stepsfuncs[cmd_name]
         kwargs = {}
         # Enumerate all argument in the function, and check from where
         # to find the value
@@ -568,13 +611,8 @@ def read_yaml(filename, template, defaults, variables, skip):
         script_yaml['variables'][key] = value
 
     # check the executable path
-    script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults']['fio'])
-    # hpacucli is not mandatory, don't failed on it
-    try:
-    script_yaml['defaults']['hpacucli'] = check_executable(script_yaml['defaults']['hpacucli'])
-    except FioException as e:
-        # keep it, will be thrown when needed
-        script_yaml['defaults']['hpacucli'] = e
+    for f in checkscriptfunc:
+        f(script_yaml)
 
     fio_values = run_yaml(script_yaml, skip)
     if len(fio_values) > 0:
@@ -615,7 +653,7 @@ def main():
     else:
         template = None
 
-    defaults = { 'fio': 'fio', 'hpacucli': 'hpacucli'}
+    defaults = { }
     for default in options.defaults:
         (key, value) = default.split("=")
         if key == 'count':
@@ -644,11 +682,6 @@ def main():
             values = read_csv(file_use)
 
         plot(values, mode=options.graph_mode, filename=options.png_output)
-
-
-solver = {}
-for (name, function) in inspect.getmembers(Commands, predicate=inspect.isfunction):
-    solver[name] = function
 
 if __name__ == "__main__":
     try:
