@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 import csv
+import copy
 import inspect
 import math
 from matplotlib.backend_bases import FigureCanvasBase
@@ -589,7 +590,8 @@ def read_yaml(filename, template, defaults, variables, skip):
     if template is not None:
         #Run is over written
         if script_yaml.get('run') is None and template.get('run') is not None:
-            script_yaml['run'] = template['run']
+            # a copy is needed because script execution modify the object
+            script_yaml['run'] = copy.deepcopy(template['run'])
         # other sections are merged
         for section in ('defaults', 'variables', 'plot', 'csv'):
             if section in template:
