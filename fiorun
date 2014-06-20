@@ -25,6 +25,7 @@ from distutils import spawn
 try:
     import platform
     import ctypes
+
     libcver = platform.libc_ver()
     if libcver[0] == 'libc':
         libc = ctypes.CDLL("libc.so.%s" % libcver[1])
@@ -35,41 +36,47 @@ try:
     if libc:
         sync = libc.sync
     else:
-        sync = lambda : None
+        sync = lambda: None
 except:
-    sync = lambda : None
+    sync = lambda: None
 
 # A empty exception class
 # used to catch managed exception and errors
 class FioException(Exception):
     pass
- 
+
+
 def check_dev(blockdevice):
     try:
-        blockdev = os.stat("/dev/%s" % blockdevice.replace("/dev/","").replace('!', '/'))
+        blockdev = os.stat("/dev/%s" % blockdevice.replace("/dev/", "").replace('!', '/'))
         return stat.S_ISBLK(blockdev.st_mode)
     except Exception as e:
         return False
 
 # Define the register command decorator
 stepsfuncs = {}
+
+
 def step(func, *args, **kwargs):
     stepsfuncs[func.__name__] = func
     return func
 
+
 checkscriptfunc = []
+
+
 def checkscript(func, *args, **kwargs):
     checkscriptfunc.append(func)
     return func
 
-class FioStat(object):
 
-    label      = property(lambda x: x._label, None, None, "label")
-    values     = property(lambda x: x._values, None, None, "all fio values")
-    version    = property(lambda x: x._values[0], None, None, "data version")
-    read_bw    = property(lambda x: x._values[6], None, None, "read bandwith")
-    write_bw   = property(lambda x: x._values[47], None, None, "write bandwith")
-    read_iops  = property(lambda x: x._values[7], None, None, "read iop/s")
+class FioStat(object):
+    label = property(lambda x: x._label, None, None, "label")
+    values = property(lambda x: x._values, None, None, "all fio values")
+    version = property(lambda x: x._values[0], None, None, "data version")
+    read_bw = property(lambda x: x._values[6], None, None, "read bandwith")
+    write_bw = property(lambda x: x._values[47], None, None, "write bandwith")
+    read_iops = property(lambda x: x._values[7], None, None, "read iop/s")
     write_iops = property(lambda x: x._values[48], None, None, "write iop/s")
     # join µs to 2ms, skip 75ms and 750ms
     latencies  = property(lambda x: [reduce(lambda x,y: x+y, x._values[99:110])] + x._values[110:117] + [reduce(lambda x,y: x+y, x._values[117:119])]+ x._values[119:121], None, None, "IO latencies")
@@ -82,13 +89,13 @@ class FioStat(object):
         if self.version == 3 and len(values) < 120:
             raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
 
+
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
 class CcissSteps(object):
-
     @staticmethod
     def get_cciss_select(slot, array=None, ld=None):
-        select = ["ctrl", "slot=%s" % slot ]
+        select = ["ctrl", "slot=%s" % slot]
         if ld is not None:
             select.extend(["ld", "%s" % ld])
         elif array is not None:
@@ -101,7 +108,7 @@ class CcissSteps(object):
         sync()
         argv = [hpacucli]
         argv.extend(CcissSteps.get_cciss_select(slot=slot))
-        argv.extend(["ld", "all", "show","detail"])
+        argv.extend(["ld", "all", "show", "detail"])
         check_ld = subprocess.Popen(argv, stdin=None, stdout=subprocess.PIPE)
         output = check_ld.communicate()[0]
         if check_ld.wait() != 0:
@@ -109,13 +116,13 @@ class CcissSteps(object):
         values = {}
         current_array = ""
         ld_list = {}
-        array_list={}
+        array_list = {}
         for l in re.split("\n", output):
-    	    entry = re.split(":", l)
+            entry = re.split(":", l)
             if len(entry) == 2:
                 key = entry[0].strip()
                 value = entry[1].strip()
-                if(key == 'Logical Drive'):
+                if (key == 'Logical Drive'):
                     values = {}
                     current_ld = int(value)
                     ld_list[current_ld] = values
@@ -141,7 +148,7 @@ class CcissSteps(object):
 
     @staticmethod
     def touch_ld(hpacucli, slot, array=None, ld=None):
-        ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+        ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
         if ld != None:
             ld_info = ld_list[ld]
         elif array != None:
@@ -151,7 +158,7 @@ class CcissSteps(object):
             keys.reverse()
             ld_info = ld_list[keys[0]]
         print ld_info['Disk Name']
-        with open(ld_info['Disk Name'],'wb', 0) as out:
+        with open(ld_info['Disk Name'], 'wb', 0) as out:
             out.write("0")
 
     @staticmethod
@@ -174,20 +181,20 @@ class CcissSteps(object):
         identity.extend(["ctrl", "slot=%s" % slot])
         if object == "ld":
             identity.extend(["ld", "%s" % ld])
-        cciss_args = [ check_executable(hpacucli)]
+        cciss_args = [check_executable(hpacucli)]
         cciss_args.extend(identity)
         cciss_args.append("modify")
         cciss_args.extend(command.split(" "))
         hpacuclip = subprocess.Popen(cciss_args, stdin=None)
         return hpacuclip.wait()
-        
+
     @staticmethod
     @step
     def wait_cciss_ld(hpacucli, slot, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         while True:
-            ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+            ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
             if len(ld_list) == 0:
                 raise FioException("no ld to wait for")
 
@@ -197,11 +204,11 @@ class CcissSteps(object):
                     continue
                 elif ld_info.get("Parity Initialization Status", "") == "Queued":
                     wait_ld = True
-            if "Parity Initialization Progress" in ld_info:
-                    print "%s: %s" %(ld_info['Disk Name'], ld_info["Parity Initialization Progress"])
+                if "Parity Initialization Progress" in ld_info:
+                    print "%s: %s" % (ld_info['Disk Name'], ld_info["Parity Initialization Progress"])
                     wait_ld = True
                 if wait_ld:
-            time.sleep(30)
+                    time.sleep(30)
                     break
 
 
@@ -211,24 +218,24 @@ class CcissSteps(object):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         if array is not None or ld is not None:
-            ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+            ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
             if len(ld_list) == 0:
                 return
             for ld_info in ld_list.values():
-        if 'Disk Name' in ld_info:
-            blockdevice = ld_info['Disk Name']
-            if check_dev(blockdevice):
-                for mount_info in ld_info['Mount Points'].split(','):
-                    if mount_info.strip() == 'None':
-                        continue
-                    mount_point = mount_info.strip().split(' ')[0]
-                    CommonCommands.do_unmount(mount_point=mount_point)
+                if 'Disk Name' in ld_info:
+                    blockdevice = ld_info['Disk Name']
+                    if check_dev(blockdevice):
+                        for mount_info in ld_info['Mount Points'].split(','):
+                            if mount_info.strip() == 'None':
+                                continue
+                            mount_point = mount_info.strip().split(' ')[0]
+                            CommonCommands.do_unmount(mount_point=mount_point)
             argv = [hpacucli]
             argv.extend(CcissSteps.get_cciss_select(slot=slot, array=array, ld=ld))
             argv.extend(["delete", "forced"])
             hpacuclip = subprocess.Popen(argv, stdin=None)
-                status = hpacuclip.wait()
-                if status != 0:
+            status = hpacuclip.wait()
+            if status != 0:
                 raise FioException("hpacucli failed with status %s" % status)
             sync()
         else:
@@ -259,9 +266,9 @@ class CcissSteps(object):
             raise hpacucli
         argv = [hpacucli]
         argv.extend(CcissSteps.get_cciss_select(slot, array=array))
-        argv.extend( ["create", "type=ld", "raid=%s" % raid ])
+        argv.extend(["create", "type=ld", "raid=%s" % raid])
         if stripsize > 0:
-             argv.append("ss=%s" % stripsize)
+            argv.append("ss=%s" % stripsize)
         if size > 0:
             argv.append("size=%s" % size)
         hpacuclip = subprocess.Popen(argv, stdin=None)
@@ -287,7 +294,6 @@ class CcissSteps(object):
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
 class CommonCommands(object):
-
     @staticmethod
     @checkscript
     def check_fio(script_yaml):
@@ -299,12 +305,12 @@ class CommonCommands(object):
         if blockdevice is not None:
             if not check_dev(blockdevice):
                 return True
-            CommonCommands.do_unmount(part="/dev/%s" % blockdevice.replace('/dev/','').replace('!', '/'))
+            CommonCommands.do_unmount(part="/dev/%s" % blockdevice.replace('/dev/', '').replace('!', '/'))
             # substitution needed because of cciss/cXdX with HP's Smart Arrays
             old_path = os.getcwdu()
-            os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
-            for d in filter( lambda x: stat.S_ISDIR(os.stat(x).st_mode ) and os.path.exists("%s/dev" % x),
-                             os.listdir('.')):
+            os.chdir('/sys/block/%s' % blockdevice.replace('/dev/', '').replace('/', '!'))
+            for d in filter(lambda x: stat.S_ISDIR(os.stat(x).st_mode) and os.path.exists("%s/dev" % x),
+                            os.listdir('.')):
                 if CommonCommands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
                     os.chdir(old_path)
                     return False
@@ -329,17 +335,26 @@ class CommonCommands(object):
 
     @staticmethod
     @step
-    def do_part(blockdevice, stripsize=0, stripcount=0):
+    def do_part(blockdevice, stripsize=0, stripcount=0, size=0):
         CommonCommands.do_unmount(blockdevice=blockdevice)
-        sfdisk_args = ["sfdisk", "-L" ]
+        sfdisk_args = ["sfdisk", "-L"]
         if stripsize != 0 and stripcount != 0:
             while stripsize * 2 > 63:
                 stripsize /= 2
                 stripcount *= 2
-            sfdisk_args.extend(["-uC", "-H", "%s" % stripcount , "-S", "%s" % (stripsize * 2)])
+            sfdisk_args.extend(["-uC", "-H", "%s" % stripcount, "-S", "%s" % (stripsize * 2)])
+            sizeratio = stripcount * stripsize * 2 / 1024
+        else:
+            sfdisk_args.extend(["-uM"])
+            sizeratio = 1
         sfdisk_args.append(blockdevice)
         sfdisk = subprocess.Popen(sfdisk_args, stdin=subprocess.PIPE)
-        sfdisk.communicate(input="1,,,\n")
+        if size == 0:
+            input = "1,,,\n"
+        else:
+            input = "1,%d,,\n" % size / sizeratio
+
+        sfdisk.communicate(input=input)
         if sfdisk.wait() == 0:
             sync()
             return subprocess.Popen(["blockdev", "--flushbufs", blockdevice]).wait()
@@ -356,15 +371,15 @@ class CommonCommands(object):
             return False
         mkfs_args = ["mkfs.xfs", "-f", "-L", "bench"]
         if logdev:
-            mkfs_args.extend(["-l", "logdev=%s" % logdev, "-l", "size=2136997888" ])
-        if stripsize !=0 and stripcount != 0:
-            mkfs_args.extend(["-d", "su=%s" %(stripsize * 1024), "-d", "sw=%s" % stripcount])
+            mkfs_args.extend(["-l", "logdev=%s" % logdev, "-l", "size=2136997888"])
+        if stripsize != 0 and stripcount != 0:
+            mkfs_args.extend(["-d", "su=%s" % (stripsize * 1024), "-d", "sw=%s" % stripcount])
         mkfs_args.append(part)
         return subprocess.Popen(mkfs_args).wait()
 
     @staticmethod
     @step
-    def do_mount(part, mount_point, fs_type, options = []):
+    def do_mount(part, mount_point, fs_type, options=[]):
         CommonCommands.do_unmount(mount_point=mount_point)
         sync()
         if not os.path.isdir(mount_point):
@@ -391,19 +406,19 @@ class CommonCommands(object):
         if logdev:
             options.append("logdev=%s" % logdev)
         return CommonCommands.do_mount(part, mount_point, 'xfs', options)
-    
+
     @staticmethod
     @step
-    def sched_tune(blockdevice, scheduler=None, tunes = {}):
+    def sched_tune(blockdevice, scheduler=None, tunes={}):
         if scheduler:
-            scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/','').replace('/', '!')
+            scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/', '').replace('/', '!')
             stat_info = os.stat(scheduler_file)
             if not stat.S_ISREG(stat_info.st_mode):
                 raise FioException("invalid scheduler controler: %s", scheduler_file)
             with open(scheduler_file, "w") as f:
                 f.write(scheduler)
         if len(tunes) > 0:
-            scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/','').replace('/', '!')
+            scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/', '').replace('/', '!')
             stat_info = os.stat(scheduler_dir)
             if not stat.S_ISDIR(stat_info.st_mode):
                 raise FioException("invalid scheduler directory controler: %s", scheduler_dir)
@@ -412,16 +427,16 @@ class CommonCommands(object):
                 stat_info = os.stat(tune_file)
                 if not stat.S_ISREG(stat_info.st_mode):
                     raise FioException("invalid scheduler tuner file: %s", tune_file)
-                with open(tune_file, "w") as f:                    
+                with open(tune_file, "w") as f:
                     f.write("%s" % value)
 
     @staticmethod
     @step
-    def do_fio(label, fio_script, fio, opts = None, count = 1, variables = {}):
+    def do_fio(label, fio_script, fio, opts=None, count=1, variables={}):
 
         # if a variable is a dict, use the label as a key to the real value
-        variables_clean ={}
-        for (key, value)  in variables.items():
+        variables_clean = {}
+        for (key, value) in variables.items():
             if value.__class__ == {}.__class__:
                 variables_clean[key] = value[label]
             else:
@@ -444,7 +459,7 @@ class CommonCommands(object):
                 fio_args.extend(opts)
             fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
             os.close(script_r)
-        
+
             # Parse the fio script as a template
             with open(fio_script, "r") as fio_script_file:
                 for line in fio_script_file:
@@ -453,7 +468,7 @@ class CommonCommands(object):
                     except KeyError as e:
                         raise FioException("Unknown variable: %s", e)
             os.close(script_w)
-        
+
             fio_stdout = fio_process.communicate()[0]
             status = fio_process.wait()
             if status != 0:
@@ -480,16 +495,16 @@ class CommonCommands(object):
                 yield (label, cvs_line)
             except ValueError as e:
                 raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
-            
+
     @staticmethod
     @step
     def clean(dir):
         try:
             for root, subFolders, files in os.walk(dir, topdown=False):
                 for folder in subFolders:
-                    os.rmdir(os.path.join(root,folder))
+                    os.rmdir(os.path.join(root, folder))
                 for onefile in files:
-                    os.remove(os.path.join(root,onefile))
+                    os.remove(os.path.join(root, onefile))
         except OSError as e:
             raise FioException("clean %s failed: %s" % (dir, e))
 
@@ -513,9 +528,10 @@ class CommonCommands(object):
             os.chdir(step)
         os.chdir(old_path)
 
+
 def run_script(script):
     fio_values = []
-    for (f, kwargs)  in script:
+    for (f, kwargs) in script:
         print "step %s(%s)" % (f.__name__, kwargs)
         try:
             execute = f(**kwargs)
@@ -532,7 +548,8 @@ def run_script(script):
 
     return fio_values
 
-def run_yaml(script_yaml,skip):
+
+def run_yaml(script_yaml, skip):
     script = []
     for cmd in script_yaml['run'][skip:]:
         # if the command is a plain string,
@@ -563,6 +580,7 @@ def run_yaml(script_yaml,skip):
         script.append((cmd_func, kwargs))
 
     return run_script(script)
+
 
 def plot(fio_values, mode="bw", filename=None):
     column_labels = [ "<=2", "4", "10", "20", "50", "100", "250", "500", "1000", "2000", ">=2000" ]
@@ -667,9 +685,10 @@ def plot(fio_values, mode="bw", filename=None):
 def save_csv(fio_values, filename):
     with open(filename, 'wb') as csvfile:
         cvsoutput = csv.writer(csvfile, delimiter=',',
-                                quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
+                               quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
         for row in fio_values:
             cvsoutput.writerow([row.label] + row.values)
+
 
 def read_csv(filename, values=[]):
     with open(filename, 'rb') as csvfile:
@@ -679,19 +698,21 @@ def read_csv(filename, values=[]):
                 values.append(FioStat(row[0], row[1:]))
     return values
 
+
 def check_executable(filename):
     if filename is None:
         raise FioException("no command given")
     filename_path = spawn.find_executable(filename)
     if filename_path is not None:
         try:
-            if not os.access(filename_path,  os.X_OK):
+            if not os.access(filename_path, os.X_OK):
                 raise FioException("no executable command '%s'" % filename_path)
         except OSError as e:
             raise FioException("no valid command path '%s': '%s'" % (filename_path, e))
     else:
         raise FioException("command '%s' not found in path" % filename)
     return filename_path
+
 
 def read_yaml(filename, template, defaults, variables, skip):
     try:
@@ -715,19 +736,19 @@ def read_yaml(filename, template, defaults, variables, skip):
             if section in template:
                 if section not in script_yaml:
                     script_yaml[section] = {}
-                for (key,value) in template[section].items():
+                for (key, value) in template[section].items():
                     if key not in script_yaml[section]:
                         script_yaml[section][key] = value
 
     if not 'defaults' in script_yaml:
         script_yaml['defaults'] = {}
-    for (key,value) in defaults.items():
+    for (key, value) in defaults.items():
         if not key in script_yaml['defaults']:
-        script_yaml['defaults'][key] = value
-        
+            script_yaml['defaults'][key] = value
+
     if not 'variables' in script_yaml:
-        script_yaml['variables'] = {}        
-    for (key,value) in variables.items():
+        script_yaml['variables'] = {}
+    for (key, value) in variables.items():
         script_yaml['variables'][key] = value
 
     # check the executable path
@@ -736,17 +757,17 @@ def read_yaml(filename, template, defaults, variables, skip):
 
     fio_values = run_yaml(script_yaml, skip)
     if len(fio_values) > 0:
-        if('csv' in script_yaml):
+        if ('csv' in script_yaml):
             save_csv(fio_values, **script_yaml['csv'])
         plot(fio_values, **script_yaml['plot'])
 
-def main():
 
+def main():
     parser = OptionParser(usage="\n%prog [options] yaml_script+\n%prog -c [options] csv_values+")
 
     yaml_group = OptionGroup(parser, "Yaml script execution")
-    yaml_group.add_option("-V", "--variable", dest="variables", action="append", default = [])
-    yaml_group.add_option("-D", "--default", dest="defaults", action="append", default = [])
+    yaml_group.add_option("-V", "--variable", dest="variables", action="append", default=[])
+    yaml_group.add_option("-D", "--default", dest="defaults", action="append", default=[])
     yaml_group.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
     yaml_group.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
     yaml_group.add_option("-t", "--template", action="store", dest="template", default=None)
@@ -773,13 +794,13 @@ def main():
     else:
         template = None
 
-    defaults = { }
+    defaults = {}
     for default in options.defaults:
         (key, value) = default.split("=")
         if key == 'count':
             value = int(value)
         defaults[key] = value
-    
+
     variables = {}
     for default in options.variables:
         (key, value) = default.split("=")
@@ -790,18 +811,19 @@ def main():
         exit(1)
 
     if not options.csv_input:
-    for file_use in args:
-           try:
+        for file_use in args:
+            try:
                 read_yaml(file_use, template, defaults, variables, options.skip)
-           except FioException as e:
-               print e
-               break
+            except FioException as e:
+                print e
+                break
     else:
         values = []
         for file_use in args:
             values = read_csv(file_use)
 
         plot(values, mode=options.graph_mode, filename=options.png_output)
+
 
 if __name__ == "__main__":
     try:
