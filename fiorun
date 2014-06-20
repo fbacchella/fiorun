@@ -46,9 +46,9 @@ class FioException(Exception):
  
 def check_dev(blockdevice):
     try:
-        blockdev = os.stat(blockdevice)
+        blockdev = os.stat("/dev/%s" % blockdevice.replace("/dev/","").replace('!', '/'))
         return stat.S_ISBLK(blockdev.st_mode)
-    except:
+    except Exception as e:
         return False
 
 # Define the register command decorator
@@ -87,6 +87,74 @@ class FioStat(object):
 class CcissSteps(object):
 
     @staticmethod
+    def get_cciss_select(slot, array=None, ld=None):
+        select = ["ctrl", "slot=%s" % slot ]
+        if ld is not None:
+            select.extend(["ld", "%s" % ld])
+        elif array is not None:
+            select.extend(["array", "%s" % array])
+        return select
+
+
+    @staticmethod
+    def get_cciss_info(hpacucli, slot, ld=None, array=None):
+        sync()
+        argv = [hpacucli]
+        argv.extend(CcissSteps.get_cciss_select(slot=slot))
+        argv.extend(["ld", "all", "show","detail"])
+        check_ld = subprocess.Popen(argv, stdin=None, stdout=subprocess.PIPE)
+        output = check_ld.communicate()[0]
+        if check_ld.wait() != 0:
+            return {}
+        values = {}
+        current_array = ""
+        ld_list = {}
+        array_list={}
+        for l in re.split("\n", output):
+    	    entry = re.split(":", l)
+            if len(entry) == 2:
+                key = entry[0].strip()
+                value = entry[1].strip()
+                if(key == 'Logical Drive'):
+                    values = {}
+                    current_ld = int(value)
+                    ld_list[current_ld] = values
+                    array_list[current_array][current_ld] = values
+                    values['Array'] = current_array
+                else:
+                    values[key] = value
+            else:
+                m = re.search('\w*array ([A-Z]+)', l)
+                if m is not None:
+                    current_array = m.group(1)
+                    array_list[current_array] = {}
+        if ld is not None:
+            return_ld = ld_list.get(ld, {})
+            if len(return_ld) > 0:
+                return {ld: return_ld}
+            else:
+                return {}
+        elif array is not None:
+            return array_list.get(array, {})
+        else:
+            return array_list
+
+    @staticmethod
+    def touch_ld(hpacucli, slot, array=None, ld=None):
+        ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+        if ld != None:
+            ld_info = ld_list[ld]
+        elif array != None:
+            # Touch the last ld
+            keys = ld_list.keys()
+            keys.sort()
+            keys.reverse()
+            ld_info = ld_list[keys[0]]
+        print ld_info['Disk Name']
+        with open(ld_info['Disk Name'],'wb', 0) as out:
+            out.write("0")
+
+    @staticmethod
     @checkscript
     def check_cciss(script_yaml):
         # hpacucli is not mandatory, don't failed on it
@@ -115,42 +183,38 @@ class CcissSteps(object):
         
     @staticmethod
     @step
-    def get_cciss_info(slot, ld, hpacucli):
-        if isinstance(hpacucli, FioException):
-            raise hpacucli
-        sync()
-        check_ld = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "show"], stdin=None, stdout=subprocess.PIPE)
-        output = check_ld.communicate()[0]
-        if check_ld.wait() != 0:
-            return {}
-        values = {}
-        for l in re.split("\n", output):
-    	    entry = re.split(":", l)
-            if len(entry) == 2:
-                values[entry[0].strip()] = entry[1].strip()
-        return values
-
-    @staticmethod
-    @step
-    def wait_cciss_ld(slot, ld, hpacucli):
+    def wait_cciss_ld(hpacucli, slot, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         while True:
-            ld_info = CcissSteps.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
-            if not "Parity Initialization Status" in ld_info:
-                return
-            if ld_info["Parity Initialization Status"] == "Initialization Completed":
-                return
+            ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+            if len(ld_list) == 0:
+                raise FioException("no ld to wait for")
+
+            wait_ld = False
+            for ld_info in ld_list.values():
+                if ld_info.get("Parity Initialization Status", "") == "Initialization Completed":
+                    continue
+                elif ld_info.get("Parity Initialization Status", "") == "Queued":
+                    wait_ld = True
             if "Parity Initialization Progress" in ld_info:
-                print ld_info["Parity Initialization in Progress"]
+                    print "%s: %s" %(ld_info['Disk Name'], ld_info["Parity Initialization Progress"])
+                    wait_ld = True
+                if wait_ld:
             time.sleep(30)
+                    break
+
 
     @staticmethod
     @step
-    def do_cciss_ld(slot, ld, raid, hpacucli, stripsize=None):
+    def do_delete_cciss(hpacucli, slot, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
-        ld_info =  CcissSteps.get_cciss_info(slot=slot, ld=ld, hpacucli=hpacucli)
+        if array is not None or ld is not None:
+            ld_list =  CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
+            if len(ld_list) == 0:
+                return
+            for ld_info in ld_list.values():
         if 'Disk Name' in ld_info:
             blockdevice = ld_info['Disk Name']
             if check_dev(blockdevice):
@@ -159,13 +223,66 @@ class CcissSteps(object):
                         continue
                     mount_point = mount_info.strip().split(' ')[0]
                     CommonCommands.do_unmount(mount_point=mount_point)
-                hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "ld", "%s" % ld, "delete", "forced"], stdin=None)
+            argv = [hpacucli]
+            argv.extend(CcissSteps.get_cciss_select(slot=slot, array=array, ld=ld))
+            argv.extend(["delete", "forced"])
+            hpacuclip = subprocess.Popen(argv, stdin=None)
                 status = hpacuclip.wait()
                 if status != 0:
-                    raise FioException("hpacucli failed with status %s", status)
+                raise FioException("hpacucli failed with status %s" % status)
             sync()
-        hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all", "ss=%s" % stripsize], stdin=None)
-        return hpacuclip.wait()
+        else:
+            raise FioException("No cciss volume to destroy")
+
+    @staticmethod
+    @step
+    def do_cciss_create_ld(hpacucli, slot, raid, stripsize=0, size=0, array=None, ld=None):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
+        CcissSteps.do_delete_cciss(hpacucli, slot, array, ld)
+        argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all"]
+        if stripsize > 0:
+            argv.append("ss=%s" % stripsize)
+        if size > 0:
+            argv.append("size=%s" % size)
+        hpacuclip = subprocess.Popen(argv, stdin=None)
+        status = hpacuclip.wait()
+        # needs to touch the created ld, to be sure build is started
+        if status == 0:
+            CcissSteps.touch_ld(hpacucli, slot, array, ld)
+        return status
+
+    @staticmethod
+    @step
+    def do_cciss_add_ld(slot, raid, array, hpacucli, stripsize=0, size=0):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
+        argv = [hpacucli]
+        argv.extend(CcissSteps.get_cciss_select(slot, array=array))
+        argv.extend( ["create", "type=ld", "raid=%s" % raid ])
+        if stripsize > 0:
+             argv.append("ss=%s" % stripsize)
+        if size > 0:
+            argv.append("size=%s" % size)
+        hpacuclip = subprocess.Popen(argv, stdin=None)
+        status = hpacuclip.wait()
+        # needs to touch the created ld, to be sure build is started
+        if status == 0:
+            CcissSteps.touch_ld(hpacucli, slot, array)
+        return status
+
+    @staticmethod
+    @step
+    def do_cciss_jbod(slot, hpacucli, drives):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
+        for drive in drives:
+            hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive], stdin=None)
+            status = hpacuclip.wait()
+            if status != 0:
+                return status
+        return 0
+
 
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
@@ -182,6 +299,7 @@ class CommonCommands(object):
         if blockdevice is not None:
             if not check_dev(blockdevice):
                 return True
+            CommonCommands.do_unmount(part="/dev/%s" % blockdevice.replace('/dev/','').replace('!', '/'))
             # substitution needed because of cciss/cXdX with HP's Smart Arrays
             old_path = os.getcwdu()
             os.chdir('/sys/block/%s' % blockdevice.replace('/dev/','').replace('/', '!') )
@@ -200,7 +318,7 @@ class CommonCommands(object):
                     mount_point = mounted[1]
                     break
         if not mount_point or not os.path.isdir(mount_point):
-            return
+            return 0
         old_path = os.getcwdu()
         os.chdir(mount_point)
         benchdir = os.stat(".")

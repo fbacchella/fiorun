@@ -77,24 +77,36 @@ Actions
 
   apply a modification on a HP's SmartArray controler
 
-   * object (mandatory): either ctrl or ld, will apply the modification on the controler or the logicial drive
+   * object (mandatory): either ctrl or ld, will apply the modification on the controller or the logical drive
    * command (mandatory): the modify command to execute
-   * slot: the slot to identify the controler
+   * slot: the slot to identify the controller
    * ld: the logical drive
 
-* do_cciss_ld
+* do_cciss_create_ld
 
-  create a logical drive on a HP's SmartArray.
+  create a logical drive on a HP's SmartArray. If ld or array is given, it's destroyed before the creation.
 
-   * slot (mandatory): the slot to identify the controler
+   * slot (mandatory): the slot to identify the controller
    * ld (mandatory): the logical drive
+   * stripsize: a possible stripsize to use
+   * size: define a ld size, in megabyte
+
+* do_cciss_add_ld
+
+  Add a ld to an array.
+
+   * slot (mandatory): the slot to identify the controller
+   * ld (mandatory): the logical drive
+   * stripsize: a possible stripsize to use
+   * size: define a ld size, in megabyte
 
 * wait_cciss_ld
 
-  Wait for HP's SmartArray logical drive to be ready after a RAID creation.
+  Wait for HP's SmartArray logical drive to be ready after a RAID creation. Either a ld or a array must be given.
 
-   * slot (mandatory): the slot to identify the controler
-   * ld (mandatory): the logical drive
+   * slot (mandatory): the slot to identify the controller
+   * ld : the logical drive what was created
+   * array: the array where the ld was created, wait for all the logical drives in the array.
 
 * do_part
 
@@ -102,15 +114,15 @@ Actions
   will be stripsize * stripcount.
 
    * blockdevice (mandatory): the block device to partition
-   * stripsize (in kB): an optionnal strip size for alignement
-   * stripcount: an optionnal number of strip
+   * stripsize (in kB): an optionnal strip size for alignment
+   * stripcount: an optional number of strip
 
 * do_fs_xfs
   
-  Create a xfs file system. If stripsize and stripcount are given, fs alignement hint will be given
+  Create a xfs file system. If stripsize and stripcount are given, fs alignment hint will be given
   to the mkfs command.
 
-   * part (mandatory): the partion to use
+   * part (mandatory): the partition to use
    * logdev: a possible external log device
    * stripsize (in kB): strip size
    * stripcount: the number of strips
@@ -137,7 +149,7 @@ Actions
   Mount a xfs file system
    * part (mandatory): the partition to mount
    * mount_point (mandatory): where to mount the filesystem
-   * logdev: an optionnal log device
+   * logdev: an optional log device
    * noatime: mount with noatime, default to true
    * inode64: use inode64, default to true
 
