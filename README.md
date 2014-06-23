@@ -56,6 +56,10 @@ A simple yaml look likes :
       - do_fio:
           label: "B"
 
+In samples, one can find a full configuration, that compare performance for different RAID level on a HP Smart Array.
+
+It builds 3 logicaldrive, with a different RAID level for each one and ran an 8k block, random mix of 70 % read /30% write.
+
 Installation
 ============
 
