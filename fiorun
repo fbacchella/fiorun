@@ -4,11 +4,6 @@ import csv
 import copy
 import inspect
 import math
-from matplotlib.backend_bases import FigureCanvasBase
-from matplotlib.figure import Figure, SubplotParams
-from matplotlib.ticker import FuncFormatter
-import matplotlib.cm
-import numpy
 import os
 import os.path
 import re
@@ -17,9 +12,17 @@ import string
 import subprocess
 import sys
 import time
+from optparse import OptionParser, OptionGroup
+
+from matplotlib.backend_bases import FigureCanvasBase
+from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter
+from matplotlib.colors import LogNorm
+import matplotlib
+import matplotlib.cm
+import numpy
 import yaml
 
-from optparse import OptionParser, OptionGroup
 from distutils import spawn
 
 try:
@@ -584,9 +587,9 @@ def run_yaml(script_yaml, skip):
     return run_script(script)
 
 
-def plot(fio_values, mode="bw", filename=None):
-    column_labels = [ "<=2", "4", "10", "20", "50", "100", "250", "500", "1000", "2000", ">=2000" ]
-    
+def plot(fio_values, mode="bw", filename=None, title=None):
+    column_labels = ["<=2", "4", "10", "20", "50", "100", "250", "500", "1000", "2000", ">=2000"]
+
     row_labels = []
     ms_values = []
     bw_values_read = []
@@ -607,72 +610,90 @@ def plot(fio_values, mode="bw", filename=None):
 
     waitarray = numpy.array(ms_values).transpose()
     maxwait = numpy.amax(ms_values)
-    normalized = waitarray/maxwait * 1000
+    normalized = waitarray / maxwait * 1000
 
-    fig = Figure(subplotpars=SubplotParams(right=0.85, left=0.07))
-    ax1 = fig.add_subplot(1, 1, 1)
+    # fig = Figure(subplotpars=SubplotParams(right=0.85, left=0.85))
+    fig = Figure()
+    if title is not None:
+        fig.suptitle(title)
+    ax2 = fig.add_subplot(1, 1, 1)
+    ax1 = ax2.twinx()
 
     ax1.set_xticks(numpy.arange(len(row_labels)), minor=False)
     ax1.set_xticklabels(row_labels, minor=False)
-
-    ax2 = ax1.twinx()
-
-    # draw the latencies circles
-    ax1.scatter(X.ravel(), Y.ravel(), c=Y, s=normalized.ravel(), alpha=0.5, cmap="jet")
-
     ax1.set_xlim(-0.5, len(row_labels) - 0.5)
 
-    ax1.set_ylim(bottom=-1)
+    ax1.set_ylim(bottom=-1, top=11)
     ax1.set_yticks(range(len(column_labels)))
     ax1.set_yticklabels(column_labels, minor=False)
 
+    # draw the latencies circles
+    #colors = Y
+    #colors = [[2,2,2,2], [4,4,4,4], [10,10,10,10], [20,20,20,20], [50,50,50,50], [100,100,100,100], [250,250,250,250], [500,500,500,500], [1000,1000,1000,1000], [2000,2000,2000,2000]]
+    #print len(ms_values[0])
+    colors_range = [[2, 4, 10, 20, 50, 100, 250, 500, 1000, 2000, 5000]]
+    colors = numpy.array(colors_range * len(row_labels)).transpose()
+    latency_spots = ax1.scatter(X.ravel(), Y.ravel(), c=colors.ravel(), s=normalized, alpha=0.5, cmap="jet",
+                                norm=LogNorm())
+    cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
+    cbar.set_label('latency color scale')
+
     # Draw the bw or io/s line
     if mode == "bw":
+        symbol = "k"
+        magnitude_symbols = ["M", "G", "T"]
         to_plot_read = bw_values_read
         to_plot_write = bw_values_write
         ylabel = 'bandwidth'
         radix = 1024
         base = 8
+        log_base = 2
+        y_max = numpy.array(to_plot_read + to_plot_write).max()
+        y_max_new = math.pow(2, math.ceil(math.log(y_max, 2)))
     else:
+        symbol = ""
+        magnitude_symbols = ["k", "M", "G", "T"]
         to_plot_read = iops_values_read
         to_plot_write = iops_values_write
         ylabel = 'io/s'
         radix = 1000
         base = 10
+        log_base = 10
+        y_max = (numpy.array(to_plot_read) + numpy.array(to_plot_write)).max()
+        y_max_new = math.pow(2, math.ceil(math.log(y_max, 2)))
 
     # pop start from the end
-    magnitude_symbols = ["M", "G", "T"]
     magnitude_symbols.reverse()
 
     max_plot = max(numpy.amax(to_plot_read), numpy.amax(to_plot_write))
     if max_plot != 0:
         max_plot = math.pow(base, math.ceil(math.log(max_plot, base)))
-    
+
     factor = 1
-    symbol = "k"
     max_plot_temp = max_plot
     while max_plot_temp > radix:
         max_plot_temp /= radix
         factor *= radix
         symbol = magnitude_symbols.pop()
-    
+
     if radix == 1024 and symbol:
         symbol += 'i'
 
     ax2.set_ylabel(ylabel, color='b')
     for tl in ax2.get_yticklabels():
         tl.set_color('b')
-    formatter = FuncFormatter(lambda x,y: '%1.1f %s' % (x / factor, symbol))
+    formatter = FuncFormatter(lambda x, y: '%1.1f %s' % (x / factor, symbol))
     ax2.yaxis.set_major_formatter(formatter)
-    ax2.plot(x, to_plot_read, 'b.-')
-    ax2.plot(x, to_plot_write, 'g+-')
+    if mode == "iops":
+        ax2.plot(x, numpy.array(to_plot_read) + numpy.array(to_plot_write), 'b.-')
+    else:
+        ax2.plot(x, to_plot_read, 'b.-')
+        ax2.plot(x, to_plot_write, 'g+-')
 
-    plot_array = numpy.array(to_plot_read + to_plot_write)
-
-    y_max = plot_array.max()
-    y_max_new = math.pow(2 , math.ceil(math.log(y_max, 2)))
-    ax2.set_ylim(0, y_max_new * 1.2)
-    yticks = map(lambda x: (1.0 * x/base) * y_max_new, range(base))
+    #y_max = numpy.array(to_plot_read + to_plot_write).max() * 2
+    #y_max_new = math.pow(2 , math.ceil(math.log(y_max, 2)))
+    ax2.set_ylim(0, y_max_new * 1.05)
+    yticks = map(lambda x: (1.0 * x / base) * y_max_new, range(base + 1))
     ax2.set_yticks(yticks, minor=False)
 
     if filename:
@@ -681,6 +702,7 @@ def plot(fio_values, mode="bw", filename=None):
     else:
         # import only when needed, it uses X11
         import matplotlib.pyplot
+
         matplotlib.pyplot.show(fig)
 
 
@@ -780,6 +802,7 @@ def main():
     csv_group.add_option("-c", "--csv", action="store_true", dest="csv_input", default=False)
     csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default="iops", type="choice", choices=("bw", "iops") )
     csv_group.add_option("-p", "--png", action="store", dest="png_output", default=None, type=type(""))
+    csv_group.add_option("-T", "--title", action="store", dest="graph_title", default=None, type=type(""))
     parser.add_option_group(csv_group)
 
     (options, args) = parser.parse_args()
@@ -824,7 +847,7 @@ def main():
         for file_use in args:
             values = read_csv(file_use)
 
-        plot(values, mode=options.graph_mode, filename=options.png_output)
+        plot(values, mode=options.graph_mode, filename=options.png_output, title=options.graph_title)
 
 
 if __name__ == "__main__":
