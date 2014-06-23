@@ -182,6 +182,28 @@ Actions
 
    * dir (mandatory): the directory to create
 
+Plot
+====
+
+The plot section controls how the graph output.
+
+It takes three parameters:
+
+* filename: the filename for the generated file
+* title: the graph title
+* mode: either "bw" or "iops", does the graph output the bandwidth or the io/s
+
+csv
+====
+
+If provided, the values will be saved as a csv file, for latter reuse. It take one argument, the csv file name
+
+It takes three parameters:
+
+* filename: the filename for the generated file
+* title: the graph title
+* mode: either "bw" or "iops", does the graph output the bandwidth or the io/s
+
 Variables
 =========
 
