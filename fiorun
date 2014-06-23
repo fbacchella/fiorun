@@ -210,6 +210,8 @@ class CcissSteps(object):
                 if wait_ld:
                     time.sleep(30)
                     break
+            if not wait_ld:
+                break
 
 
     @staticmethod
