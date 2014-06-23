@@ -1,0 +1,68 @@
+defaults:
+    fio_script: "samples/rwrand.8k.fio"
+    hpacucli: hpssacli
+
+plot:
+  mode: iops
+  filename: raidcompare.png
+  title: RAID on a P400
+
+variables:
+    fiodest:
+        RAID 0: /bench1/fiodata
+        RAID 5: /bench2/fiodata
+        RAID 6: /bench3/fiodata
+    size: 32g
+    numjobs: 4
+    directio: 1
+    ioengine: sync
+
+csv:
+  filename: raidcompare.csv
+
+run:
+  - do_delete_cciss:
+        slot: 0
+        array: B
+  - do_cciss_create_ld:
+      slot: 0
+      array: B
+      raid: 0
+      size: 65535
+  - do_cciss_add_ld:
+      slot: 0
+      raid: 5
+      size: 65535
+      array: B
+  - do_cciss_add_ld:
+      slot: 0
+      raid: 6
+      size: 65535
+      array: B
+  - wait_cciss_ld:
+      slot: 0
+      array: B
+  - do_fs_xfs:
+      part: /dev/cciss/c0d1
+  - do_mount_xfs:
+      part: /dev/cciss/c0d1
+      mount_point: /bench1
+      noatime: True
+  - do_fs_xfs:
+      part: /dev/cciss/c0d2
+  - do_mount_xfs:
+      part: /dev/cciss/c0d2
+      mount_point: /bench2
+      noatime: True
+  - do_fs_xfs:
+      part: /dev/cciss/c0d3
+  - do_mount_xfs:
+      part: /dev/cciss/c0d3
+      mount_point: /bench3
+      noatime: True
+  - do_fio:
+      label: RAID 0
+  - do_fio:
+      label: RAID 5
+  - do_fio:
+      label: RAID 6
