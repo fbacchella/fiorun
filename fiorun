@@ -567,6 +567,8 @@ def run_yaml(script_yaml, skip):
             cmd_args = {}
         if cmd_name not in stepsfuncs:
             print "unknown %s" % cmd_name
+        if cmd_name not in stepsfuncs:
+            raise FioException("unknown action: %s" % cmd_name)
         cmd_func = stepsfuncs[cmd_name]
         kwargs = {}
         # Enumerate all argument in the function, and check from where
