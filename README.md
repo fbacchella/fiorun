@@ -77,6 +77,17 @@ So to build an python virtual env with latest dependencies version, on a Redhat,
 Actions
 =======
 
+* do_delete_all_cciss
+
+   Loop to delete the specified array. Usefull if you want to delete a bunch of arrays. Only the first array must be
+   given, all the next one will be destroy. Beware, it stops only where is nothing left to do. So if the last array needs
+   to be kept, don't use it.
+    
+   * hpacucli, the path to the hpacucli command
+   * slot, the slot where to look for the array
+   * array, the array to destroy
+   
+   
 * modify_cciss
 
   apply a modification on a HP's SmartArray controler

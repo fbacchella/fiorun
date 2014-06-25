@@ -248,6 +248,19 @@ class CcissSteps(object):
 
     @staticmethod
     @step
+    def do_delete_all_cciss(hpacucli, slot, array=None):
+        if isinstance(hpacucli, FioException):
+            raise hpacucli
+        if array is not None:
+            while True:
+                ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, hpacucli=hpacucli)
+                if len(ld_list) == 0:
+                    break
+                else:
+                    CcissSteps.do_delete_cciss(hpacucli, slot, array)
+
+    @staticmethod
+    @step
     def do_cciss_create_ld(hpacucli, slot, raid, stripsize=0, size=0, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
