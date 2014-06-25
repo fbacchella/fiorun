@@ -1,0 +1,57 @@
+defaults:
+    fio_script: "samples/assertiops.fio"
+    mount_point: /dev/cciss/c0d1
+    part: /dev/cciss/c0d1
+    noatime: True
+    hpacucli: hpssacli
+plot:
+  mode: iops
+  filename: samples/cgroup.png
+  title: cgroup usage
+
+variables:
+    fiodest: /dev/cciss/c0d1
+    size: 8g
+    rate_iops: 25
+    numjobs:
+        without cgroup: 4
+        50: 2
+        75: 3
+        100: 4
+        200: 8
+        400: 16
+
+csv:
+  filename: samples/cgroup.png
+
+run:
+    - do_delete_all_cciss:
+        slot: 0
+        array: B
+    - do_cciss_create_ld:
+        slot: 0
+        array: B
+        raid: 0
+    - cgroup_prepare
+    - do_fio:
+        label: without cgroup
+    - do_cgroup_fio:
+        label: 50
+        tunables:
+            blkio.throttle.read_iops_device: 100
+    - do_cgroup_fio:
+        label: 75
+        tunables:
+            blkio.throttle.read_iops_device: 100
+    - do_cgroup_fio:
+        label: 100
+        tunables:
+            blkio.throttle.read_iops_device: 100
+    - do_cgroup_fio:
+        label: 200
+        tunables:
+            blkio.throttle.read_iops_device: 100
+    - do_cgroup_fio:
+        label: 400
+        tunables:
+            blkio.throttle.read_iops_device: 100

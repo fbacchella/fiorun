@@ -309,6 +309,82 @@ class CcissSteps(object):
         return 0
 
 
+class CGroup(object):
+    @staticmethod
+    @step
+    def cgroup_prepare():
+        mount_point = "/cgroup/blkio"
+        status = CommonCommands.do_mount("iops", mount_point, "cgroup", ["blkio"])
+        if status == 0:
+            if not os.path.exists("/cgroup/blkio/fiorun"):
+                os.mkdir("/cgroup/blkio/fiorun")
+                return 0
+            if not os.path.exists("/cgroup/blkio/fiorun/tasks"):
+                raise FioException("/cgroup/blkio/fiorun is not a cgroup path")
+        else:
+            return status
+
+    @staticmethod
+    def sub_run_fio(pipe_fds, mountpoint, tunables, **kwargs):
+        (csv_r_fd, csv_w_fd) = pipe_fds
+        os.close(csv_r_fd)
+        pid = os.getpid()
+        if not os.path.isfile("/cgroup/blkio/fiorun/tasks"):
+            raise FioException("cgroup blkio don't exists")
+
+        subgroup = "/cgroup/blkio/fiorun/%s" % pid
+        os.mkdir(subgroup)
+
+        with open("%s/tasks" % subgroup, "w") as f:
+            f.write("%s" % pid)
+        if check_dev(mountpoint):
+            device = os.stat(mountpoint).st_rdev
+        else:
+            device = os.stat(mountpoint).st_dev
+        major = os.major(device)
+        minor = os.minor(device) & ~15
+        for (key, value) in tunables.items():
+            with open("%s/%s" % (subgroup, key), "w") as f:
+                print "%d:%d %s > %s/%s " % (major, minor, value, subgroup, key)
+                f.write("%d:%d %s" % (major, minor, value))
+
+        with os.fdopen(csv_w_fd, 'w') as csv_w:
+            cvsoutput = csv.writer(csv_w, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
+            for (label, values) in CommonCommands.do_fio(**kwargs):
+                cvsoutput.writerow([label] + values)
+        exit(0)
+
+    @staticmethod
+    @step
+    def do_cgroup_fio(mount_point, tunables, label, fio, fio_script, opts=[], count=1, variables={}):
+        CommonCommands.prepare_fio(label, fio, fio_script, opts, variables)
+
+        (csv_r_fd, csv_w_fd) = os.pipe()
+        try:
+           # Fork a child process so the parent can exit.
+           pid = os.fork()
+        except OSError, e:
+           raise Exception, "%s [%d]" % (e.strerror, e.errno)
+        if (pid == 0):
+            try:
+                CGroup.sub_run_fio((csv_r_fd, csv_w_fd), mount_point, tunables,
+                                   label=label, fio_script=fio_script, fio=fio, opts=opts, count=count, variables=variables)
+            except Exception as e:
+                print e
+                exit(1)
+        else:
+            os.close(csv_w_fd)
+            with os.fdopen(csv_r_fd, 'r') as csv_r:
+                cvsinput = csv.reader(csv_r, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
+                for row in cvsinput:
+                    yield (row[0], row[1:])
+            sync()
+            (pid, status) = os.waitpid(pid, 0)
+            status = (status & ~255) >> 8
+            os.rmdir("/cgroup/blkio/fiorun/%s" % pid)
+            if status != 0:
+                raise FioException("forked fio failed: %d" % status)
+
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
 class CommonCommands(object):
@@ -449,16 +525,56 @@ class CommonCommands(object):
                     f.write("%s" % value)
 
     @staticmethod
-    @step
-    def do_fio(label, fio_script, fio, opts=None, count=1, variables={}):
+    def run_fio(fio, fio_script, opts = [], variables = {}, prepare=False):
+        (script_r, script_w) = os.pipe()
+        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
+        if len(opts) > 0:
+            fio_args.extend(opts)
+        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
+        os.close(script_r)
 
+        # Parse the fio script as a template
+        with open(fio_script, "r") as fio_script_file:
+            for line in fio_script_file:
+                try:
+                    os.write(script_w, string.Template(line).substitute(variables))
+                except KeyError as e:
+                    raise FioException("Unknown variable: %s" % e)
+                if prepare and line.find("[global]") >= 0:
+                    os.write(script_w, "create_only=1\n")
+                    continue
+        os.close(script_w)
+
+        fio_stdout = fio_process.communicate()[0]
+        status = fio_process.wait()
+        if status != 0:
+            raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
+        return fio_stdout
+
+    @staticmethod
+    def prepare_fio(label, fio, fio_script, opts=[], variables={}):
+        variables_clean = CommonCommands.get_fio_variables(label, variables)
+        opts.extend(["--create_only", "1"])
+        CommonCommands.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
+
+    @staticmethod
+    def get_fio_variables(label, variables={}):
         # if a variable is a dict, use the label as a key to the real value
         variables_clean = {}
         for (key, value) in variables.items():
-            if value.__class__ == {}.__class__:
+            if isinstance(value, type({})):
                 variables_clean[key] = value[label]
             else:
                 variables_clean[key] = value
+        return variables_clean
+
+    @staticmethod
+    @step
+    def do_fio(label, fio, fio_script, opts=[], count=1, variables={}):
+
+        variables_clean = CommonCommands.get_fio_variables(label, variables)
+
+        CommonCommands.prepare_fio(label, fio, fio_script, opts, variables)
 
         flush_perms = True
         for i in range(count):
@@ -471,26 +587,9 @@ class CommonCommands(object):
                 except IOError:
                     flush_perms = False
                     print "insufficient permissions to flush caches, results might be not reproductible"
-            (script_r, script_w) = os.pipe()
-            fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
-            if opts:
-                fio_args.extend(opts)
-            fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
-            os.close(script_r)
 
-            # Parse the fio script as a template
-            with open(fio_script, "r") as fio_script_file:
-                for line in fio_script_file:
-                    try:
-                        os.write(script_w, string.Template(line).substitute(variables_clean))
-                    except KeyError as e:
-                        raise FioException("Unknown variable: %s", e)
-            os.close(script_w)
+            fio_stdout = CommonCommands.run_fio(fio, fio_script, opts, variables_clean)
 
-            fio_stdout = fio_process.communicate()[0]
-            status = fio_process.wait()
-            if status != 0:
-                raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
             # The fio run output is cleaned to be parsable by a csv.reader
             # don't parse error line, display them
             for found in re.compile(r'^(\d+;fio-.*)?(.*)$', re.MULTILINE).findall(fio_stdout):

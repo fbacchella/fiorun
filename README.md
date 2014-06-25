@@ -197,6 +197,21 @@ Actions
 
    * dir (mandatory): the directory to create
 
+* cgroup_prepare
+
+  Prepare a cgroup submodule for cgroups bench, it will be called /cgroup/blkio/fiorun
+
+* do_cgroup_fio
+  
+  Run fio in a dedicated cgroup, with a given set of tunables values.
+  
+  * mount_point (mandatory): the mount point for the bench run, will be used to find the block device to apply the cgroup
+  * tunables (mandatory): a set of cgroup tunable
+  * label (mandatory): a string to identify the run
+  * fio_script (mandatory): the fio script to run
+  * fio: the path to the fio command
+  * count: the number of fio run
+
 Plot
 ====
 
