@@ -629,16 +629,12 @@ def plot(fio_values, mode="bw", filename=None, title=None):
     ax1.set_yticks(range(len(column_labels)))
     ax1.set_yticklabels(column_labels, minor=False)
 
-    # draw the latencies circles
-    #colors = Y
-    #colors = [[2,2,2,2], [4,4,4,4], [10,10,10,10], [20,20,20,20], [50,50,50,50], [100,100,100,100], [250,250,250,250], [500,500,500,500], [1000,1000,1000,1000], [2000,2000,2000,2000]]
-    #print len(ms_values[0])
     colors_range = [[2, 4, 10, 20, 50, 100, 250, 500, 1000, 2000, 5000]]
     colors = numpy.array(colors_range * len(row_labels)).transpose()
     latency_spots = ax1.scatter(X.ravel(), Y.ravel(), c=colors.ravel(), s=normalized, alpha=0.5, cmap="jet",
                                 norm=LogNorm())
-    cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
-    cbar.set_label('latency color scale')
+    #cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
+    #cbar.set_label('latency color scale')
 
     # Draw the bw or io/s line
     if mode == "bw":
@@ -649,7 +645,6 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         ylabel = 'bandwidth'
         radix = 1024
         base = 8
-        log_base = 2
         y_max = numpy.array(to_plot_read + to_plot_write).max()
         y_max_new = math.pow(2, math.ceil(math.log(y_max, 2)))
     else:
@@ -660,9 +655,8 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         ylabel = 'io/s'
         radix = 1000
         base = 10
-        log_base = 10
         y_max = (numpy.array(to_plot_read) + numpy.array(to_plot_write)).max()
-        y_max_new = math.pow(2, math.ceil(math.log(y_max, 2)))
+        y_max_new = math.ceil(y_max / 5.0) * 5
 
     # pop start from the end
     magnitude_symbols.reverse()
@@ -684,7 +678,7 @@ def plot(fio_values, mode="bw", filename=None, title=None):
     ax2.set_ylabel(ylabel, color='b')
     for tl in ax2.get_yticklabels():
         tl.set_color('b')
-    formatter = FuncFormatter(lambda x, y: '%1.1f %s' % (x / factor, symbol))
+    formatter = FuncFormatter(lambda x, y: '%1.0f %s' % (x / factor, symbol))
     ax2.yaxis.set_major_formatter(formatter)
     if mode == "iops":
         ax2.plot(x, numpy.array(to_plot_read) + numpy.array(to_plot_write), 'b.-')
@@ -692,8 +686,6 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         ax2.plot(x, to_plot_read, 'b.-')
         ax2.plot(x, to_plot_write, 'g+-')
 
-    #y_max = numpy.array(to_plot_read + to_plot_write).max() * 2
-    #y_max_new = math.pow(2 , math.ceil(math.log(y_max, 2)))
     ax2.set_ylim(0, y_max_new * 1.05)
     yticks = map(lambda x: (1.0 * x / base) * y_max_new, range(base + 1))
     ax2.set_yticks(yticks, minor=False)
