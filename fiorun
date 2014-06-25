@@ -345,7 +345,6 @@ class CGroup(object):
         minor = os.minor(device) & ~15
         for (key, value) in tunables.items():
             with open("%s/%s" % (subgroup, key), "w") as f:
-                print "%d:%d %s > %s/%s " % (major, minor, value, subgroup, key)
                 f.write("%d:%d %s" % (major, minor, value))
 
         with os.fdopen(csv_w_fd, 'w') as csv_w:
