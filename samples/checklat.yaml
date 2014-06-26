@@ -1,0 +1,34 @@
+defaults:
+    fio_script: "samples/assertiops.fio"
+    mount_point: /dev/cciss/c0d1
+    part: /dev/cciss/c0d1
+plot:
+  mode: iops
+  filename: /tmp/checklat.png
+  title: io latencies
+
+variables:
+    fiodest:  /dev/cciss/c0d1
+    size: 32g
+    rate_iops: 25
+    numjobs:
+        100: 4
+        200: 8
+        400: 16
+        800: 32
+        1600: 64
+
+csv:
+  filename: /tmp/checklat.csv
+
+run:
+    - do_fio:
+        label: 100
+    - do_fio:
+        label: 200
+    - do_fio:
+        label: 400
+    - do_fio:
+        label: 800
+    - do_fio:
+        label: 1600

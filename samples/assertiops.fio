@@ -2,7 +2,8 @@
 filename=${fiodest}
 size=${size}
 direct=1
-rw=randread
+rw=randrw
+rwmixread=70
 refill_buffers
 norandommap
 randrepeat=1
