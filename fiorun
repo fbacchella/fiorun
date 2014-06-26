@@ -15,7 +15,7 @@ import time
 from optparse import OptionParser, OptionGroup
 
 from matplotlib.backend_bases import FigureCanvasBase
-from matplotlib.figure import Figure
+from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import LogNorm
 import matplotlib
@@ -83,6 +83,8 @@ class FioStat(object):
     write_iops = property(lambda x: x._values[48], None, None, "write iop/s")
     # join µs to 2ms, skip 75ms and 750ms
     latencies  = property(lambda x: [reduce(lambda x,y: x+y, x._values[99:110])] + x._values[110:117] + [reduce(lambda x,y: x+y, x._values[117:119])]+ x._values[119:121], None, None, "IO latencies")
+    read_percentiles = property(lambda x : x._read_percentiles, None, None, "read latencies bucket")
+    write_percentiles = property(lambda x : x._write_percentiles, None, None, "write latencies bucket")
 
     def __init__(self, label, values):
         if len(values) < 1:
@@ -91,7 +93,12 @@ class FioStat(object):
         self._label = label
         if self.version == 3 and len(values) < 120:
             raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
-
+        self._read_percentiles = {}
+        for (key,value) in map(lambda x: x.split("="), self._values[17:37]):
+            self._read_percentiles[key] = int(value) / 1000.0
+        self._write_percentiles = {}
+        for (key,value) in map(lambda x: x.split("="), self._values[58:78]):
+            self._write_percentiles[key] = int(value) / 1000.0
 
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
@@ -746,6 +753,25 @@ def plot(fio_values, mode="bw", filename=None, title=None):
                                 norm=LogNorm())
     #cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
     #cbar.set_label('latency color scale')
+    previous = map(lambda x: x.read_percentiles["50.00"], fio_values)
+    ax1.plot(previous, 'b-', )
+    alpha = 1.0
+    for bucket in ("90.00", "95.00", "99.00"):
+        current = map(lambda x: x.read_percentiles[bucket], fio_values)
+        alpha /= 2
+        #ax1.plot(current, 'b.-', alpha=alpha)
+        ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='blue', alpha=alpha)
+        previous = current
+
+    previous = map(lambda x: x.write_percentiles["50.00"], fio_values)
+    ax1.plot(previous, 'g-', )
+    alpha = 1.0
+    for bucket in ("90.00", "95.00", "99.00"):
+        current = map(lambda x: x.write_percentiles[bucket], fio_values)
+        alpha /= 2
+        #ax1.plot(current, 'b.-', alpha=alpha)
+        ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='green', alpha=alpha)
+        previous = current
 
     # Draw the bw or io/s line
     if mode == "bw":
@@ -778,7 +804,7 @@ def plot(fio_values, mode="bw", filename=None, title=None):
 
     factor = 1
     max_plot_temp = max_plot
-    while max_plot_temp > radix:
+    while max_plot_temp > radix * 1.5:
         max_plot_temp /= radix
         factor *= radix
         symbol = magnitude_symbols.pop()
@@ -792,7 +818,7 @@ def plot(fio_values, mode="bw", filename=None, title=None):
     formatter = FuncFormatter(lambda x, y: '%1.0f %s' % (x / factor, symbol))
     ax2.yaxis.set_major_formatter(formatter)
     if mode == "iops":
-        ax2.plot(x, numpy.array(to_plot_read) + numpy.array(to_plot_write), 'b.-')
+        ax2.plot(x, numpy.array(to_plot_read) + numpy.array(to_plot_write), 'k.-')
     else:
         ax2.plot(x, to_plot_read, 'b.-')
         ax2.plot(x, to_plot_write, 'g+-')
