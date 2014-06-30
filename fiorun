@@ -48,6 +48,15 @@ except:
 class FioException(Exception):
     pass
 
+# An exception used to store a figure
+class FigureContainer(Exception):
+    figure = property(lambda x: x._figure, None, None, "figure")
+
+    def __init__(self, figure):
+        self._figure = figure
+    def __str__(self):
+        return repr(self._figure)
+
 
 def check_dev(blockdevice):
     try:
@@ -852,6 +861,12 @@ def read_csv(filename, values=[]):
                 values.append(FioStat(row[0], row[1:]))
     return values
 
+def exec_embeded_plot(code, **kwargs):
+    try:
+        exec code in globals(), kwargs
+    except FigureContainer as e:
+        canvas = FigureCanvasBase(e.figure)
+        canvas.print_figure(kwargs['filename'])
 
 def check_executable(filename):
     if filename is None:
@@ -913,8 +928,12 @@ def read_yaml(filename, template, defaults, variables, skip):
     if len(fio_values) > 0:
         if ('csv' in script_yaml):
             save_csv(fio_values, **script_yaml['csv'])
-        plot(fio_values, **script_yaml['plot'])
-
+        if 'code' not in script_yaml['plot']:
+            plot(fio_values, **script_yaml['plot'])
+        else:
+            args = script_yaml['plot']
+            args['fio_values'] = fio_values
+            exec_embeded_plot(**args)
 
 def main():
     parser = OptionParser(usage="\n%prog [options] yaml_script+\n%prog -c [options] csv_values+")
