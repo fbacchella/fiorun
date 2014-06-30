@@ -560,7 +560,6 @@ class CommonCommands(object):
     @staticmethod
     def prepare_fio(label, fio, fio_script, opts=[], variables={}):
         variables_clean = CommonCommands.get_fio_variables(label, variables)
-        opts.extend(["--create_only", "1"])
         CommonCommands.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
 
     @staticmethod
