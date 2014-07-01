@@ -595,9 +595,8 @@ class CommonCommands(object):
             sync()
             if flush_perms:
                 try:
-                    drop_caches = open('/proc/sys/vm/drop_caches', 'w')
-                    drop_caches.write('3')
-                    drop_caches.close
+                    with open('/proc/sys/vm/drop_caches', 'w') as drop_caches:
+                        drop_caches.write('3')
                 except IOError:
                     flush_perms = False
                     print "insufficient permissions to flush caches, results might be not reproductible"
