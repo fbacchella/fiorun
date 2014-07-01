@@ -223,6 +223,12 @@ It takes three parameters:
 * title: the graph title
 * mode: either "bw" or "iops", does the graph output the bandwidth or the io/s
 
+It's possible to tailor graphs to particular needs of a bench. This section can take some custom python code in the 'code'
+key. This section received a locals set of variable, that contains fio_values, an array of FioStat, that contains the run results
+and the three parameters filename, title and mode. So all those four values are directly usable as local variables. This 
+code don't need to take care of saving the figure. It must generate a matplotlib's figure and then call 
+`raise FigureContainer(fig)`. Fiorun will save it in `filename`.
+
 csv
 ====
 
@@ -251,7 +257,7 @@ For example, by adding the following section to the yaml file:
             B: "2G"
             C: "4G"
 
-The do_fio commands with label A, B, C will run the fio script with subtituting the variable ${size} with the respective value "1G", "2G", "4G"
+The do_fio commands with label A, B, C will run the fio script with substituting the variable ${size} with the respective value "1G", "2G", "4G"
 
 Variables
 =========
