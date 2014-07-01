@@ -1,0 +1,39 @@
+defaults:
+    fio_script: "samples/stability.fio"
+    mount_point: /dev/vdb
+    part: /dev/vdb
+plot:
+  mode: iops
+  filename: /tmp/stability.png
+  title: io stability
+  code: |
+    fig = Figure(subplotpars=SubplotParams(left=0.1, right=0.85, bottom=0.05))
+    fig.suptitle('io stability')
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xscale('log')
+    for row in fio_values:
+        reversed = map(lambda (x,y) : [y, float(x)], row.read_percentiles.items())
+        values = numpy.sort(reversed, axis=0).transpose()
+        read_plotted = ax.plot(values[0], values[1], "-.", color="blue", label="read")
+    for row in fio_values:
+        reversed = map(lambda (x,y) : [y, float(x)], row.write_percentiles.items())
+        values = numpy.sort(reversed, axis=0).transpose()
+        write_plotted = ax.plot(values[0], values[1], "-+", color="green", label="write")
+    ax.set_xlim(0.5, 5000)
+    # plotted, map(lambda x: x.label, fio_values), ,
+    #ax.legend((read_plotted, write_plotted), loc='lower right')
+    raise FigureContainer(fig)
+
+variables:
+    fiodest:  /dev/vdb
+    size: 32g
+    rate_iops: 25
+    numjobs: 10
+    runtime: 60
+csv:
+  filename: /tmp/stability.csv
+
+run:
+    - do_fio:
+        label: 60
+        count: 10
