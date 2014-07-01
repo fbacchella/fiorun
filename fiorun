@@ -947,9 +947,10 @@ def main():
 
     csv_group = OptionGroup(parser, "Plot from a list of csv")
     csv_group.add_option("-c", "--csv", action="store_true", dest="csv_input", default=False)
-    csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default="iops", type="choice", choices=("bw", "iops") )
+    csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default=None, type="choice", choices=("bw", "iops") )
     csv_group.add_option("-p", "--png", action="store", dest="png_output", default=None, type=type(""))
     csv_group.add_option("-T", "--title", action="store", dest="graph_title", default=None, type=type(""))
+    csv_group.add_option("-Y", "--yaml", action="store", dest="yaml", default=None, type=type(""))
     parser.add_option_group(csv_group)
 
     (options, args) = parser.parse_args()
@@ -990,11 +991,31 @@ def main():
                 print e
                 break
     else:
+        if options.yaml is not None:
+            try:
+                yaml_file = open(options.yaml)
+                script_yaml = yaml.safe_load(yaml_file)
+                yaml_file.close()
+                graph_mode  = script_yaml['plot']['mode']
+                png_output  = script_yaml['plot']['filename']
+                graph_title = script_yaml['plot']['title']
+            except yaml.parser.ParserError as e:
+                print "invalid file %s:" % options.yaml
+                print e
+                exit(1)
+
+        if options.graph_mode is not None:
+            graph_mode = options.graph_mode
+        if options.png_output is not None:
+            png_output = options.png_output
+        if options.graph_title is not None:
+            graph_title = options.graph_title
+
         values = []
         for file_use in args:
             values = read_csv(file_use)
 
-        plot(values, mode=options.graph_mode, filename=options.png_output, title=options.graph_title)
+        exec_embeded_plot(script_yaml['plot']['code'], **{'fio_values': values, 'mode': graph_mode, 'filename': png_output, 'title': graph_title})
 
 
 if __name__ == "__main__":
