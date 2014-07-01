@@ -911,8 +911,7 @@ def read_yaml(filename, template, defaults, variables, skip):
     if not 'defaults' in script_yaml:
         script_yaml['defaults'] = {}
     for (key, value) in defaults.items():
-        if not key in script_yaml['defaults']:
-            script_yaml['defaults'][key] = value
+        script_yaml['defaults'][key] = value
 
     if not 'variables' in script_yaml:
         script_yaml['variables'] = {}
