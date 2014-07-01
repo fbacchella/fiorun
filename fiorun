@@ -34,6 +34,8 @@ try:
         libc = ctypes.CDLL("libc.so.%s" % libcver[1])
     elif libcver[0] == 'glibc' and libcver[1].startswith("2."):
         libc = ctypes.CDLL("libc.so.6")
+    elif len(platform.mac_ver()[0]) > 0:
+        libc = ctypes.CDLL("libc.dylib")
     else:
         libc = None
     if libc:
