@@ -45,6 +45,7 @@ try:
 except:
     sync = lambda: None
 
+
 # A empty exception class
 # used to catch managed exception and errors
 class FioException(Exception):
@@ -139,23 +140,24 @@ class CcissSteps(object):
         ld_list = {}
         array_list = {}
         for l in re.split("\n", output):
-            entry = re.split(":", l)
-            if len(entry) == 2:
-                key = entry[0].strip()
-                value = entry[1].strip()
-                if (key == 'Logical Drive'):
-                    values = {}
-                    current_ld = int(value)
-                    ld_list[current_ld] = values
-                    array_list[current_array][current_ld] = values
-                    values['Array'] = current_array
+            for v in re.split("  +", l):
+                entry = re.split(":", v)
+                if len(entry) == 2:
+                    key = entry[0].strip()
+                    value = entry[1].strip()
+                    if (key == 'Logical Drive'):
+                        values = {}
+                        current_ld = int(value)
+                        ld_list[current_ld] = values
+                        array_list[current_array][current_ld] = values
+                        values['Array'] = current_array
+                    else:
+                        values[key] = value
                 else:
-                    values[key] = value
-            else:
-                m = re.search('\w*array ([A-Z]+)', l)
-                if m is not None:
-                    current_array = m.group(1)
-                    array_list[current_array] = {}
+                    m = re.search('\w*array ([A-Z]+)', l)
+                    if m is not None:
+                        current_array = m.group(1)
+                        array_list[current_array] = {}
         if ld is not None:
             return_ld = ld_list.get(ld, {})
             if len(return_ld) > 0:
@@ -178,9 +180,9 @@ class CcissSteps(object):
             keys.sort()
             keys.reverse()
             ld_info = ld_list[keys[0]]
-        print ld_info['Disk Name']
-        with open(ld_info['Disk Name'], 'wb', 0) as out:
-            out.write("0")
+        if 'Disk Name' in ld_info:
+            with open(ld_info['Disk Name'], 'wb', 0) as out:
+                out.write("0")
 
     @staticmethod
     @checkscript
@@ -279,21 +281,29 @@ class CcissSteps(object):
 
     @staticmethod
     @step
-    def do_cciss_create_ld(hpacucli, slot, raid, stripsize=0, size=0, array=None, ld=None):
+    def do_cciss_create_ld(hpacucli, slot, raid=None, stripsize=0, size=0, array=None, ld=None, type='ld', datald=None, drives='all'):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         CcissSteps.do_delete_cciss(hpacucli, slot, array, ld)
-        argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=%s" % raid, "drives=all"]
+        if isinstance(drives, list):
+            drives = ",".join(drives)
+        argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=%s" % type, "drives=%s" % drives]
+        if type != 'arrayr0' and raid is not None:
+            argv.append("raid=%s" % raid)
         if stripsize > 0:
             argv.append("ss=%s" % stripsize)
         if size > 0:
             argv.append("size=%s" % size)
+        if type == 'ldcache' and datald is not None:
+            argv.append("datald=%s" % datald)
+        print " ".join(argv)
         hpacuclip = subprocess.Popen(argv, stdin=None)
         status = hpacuclip.wait()
         # needs to touch the created ld, to be sure build is started
-        if status == 0:
+        if status == 0 and type != 'ldcache':
             CcissSteps.touch_ld(hpacucli, slot, array, ld)
         return status
+
 
     @staticmethod
     @step
@@ -325,6 +335,60 @@ class CcissSteps(object):
             if status != 0:
                 return status
         return 0
+
+
+class ZFS(object):
+    @staticmethod
+    @checkscript
+    def check_zfs_commands(script_yaml):
+        script_yaml['defaults']['zfs'] = check_executable(script_yaml['defaults'].get('zfs', 'zfs'))
+        script_yaml['defaults']['zpool'] = check_executable(script_yaml['defaults'].get('zpool', 'zpool'))
+
+    @staticmethod
+    def zpool_list(zpool):
+        argv = [zpool, "list", "-H" ]
+        zpoolp = subprocess.Popen(argv, stdin=None, stdout=subprocess.PIPE)
+        output = zpoolp.communicate()[0]
+        status = zpoolp.wait()
+        if status != 0:
+            return {}
+        zpool_info = {}
+        for l in re.split("\n", output):
+            entry = re.split(r"\t", l)
+            zpool_info[entry[0]] = entry
+        return zpool_info
+
+    @staticmethod
+    @step
+    def do_destroy_zpool(zpool, name):
+        if isinstance(zpool, FioException):
+            raise zpool
+        sync()
+        zpool_info = ZFS.zpool_list(zpool)
+        if name in zpool_info:
+            zpoolp = subprocess.Popen([zpool, "destroy", name])
+            status = zpoolp.wait()
+            if status != 0:
+                raise FioException("can't detroy zpool %s" % name)
+
+    @staticmethod
+    @step
+    def do_create_zpool(zpool, name, vdev, properties={}, mount_point=None):
+        if isinstance(zpool, FioException):
+            raise zpool
+        sync()
+        ZFS.do_destroy_zpool(zpool, name)
+        argv = [zpool, "create", name ]
+        if len(properties) > 0:
+            for (key, value) in properties.items():
+                argv.append("-o %s=%s" % (key, value))
+        if mount_point is not None:
+            argv.extend(["-m", mount_point])
+        argv.extend(vdev)
+        zpoolp = subprocess.Popen(argv, stdin=None)
+        status = zpoolp.wait()
+        if status != 0:
+            return status
 
 
 class CGroup(object):
@@ -402,14 +466,174 @@ class CGroup(object):
             if status != 0:
                 raise FioException("forked fio failed: %d" % status)
 
-# A class used as a container for command
-# To add a new command, just add a staticmethod to this class
-class CommonCommands(object):
+
+class Lvm(object):
+    @staticmethod
+    @step
+    def do_lvm_purge(volumegroup=None):
+        if volumegroup is not None and os.path.isdir("/dev/%s" % volumegroup):
+            status = subprocess.Popen(["/sbin/vgremove", "-f", volumegroup]).wait()
+            if status != 0:
+                return status
+        return subprocess.Popen(["/sbin/dmsetup", "remove_all"]).wait()
+
+    @staticmethod
+    @step
+    def do_pvcreate(blockdevice=None):
+        sync()
+        return subprocess.Popen(["/sbin/pvcreate", "-ff", "-y", blockdevice]).wait()
+
+    @staticmethod
+    @step
+    def do_vgcreate(name, blockdevices):
+        sync()
+        argv = ["/sbin/vgcreate", name]
+        argv.extend(blockdevices)
+        return subprocess.Popen(argv).wait()
+
+    @staticmethod
+    @step
+    def do_vgextend(name, blockdevices):
+        argv = ["/sbin/vgextend", name]
+        argv.extend(blockdevices)
+        return subprocess.Popen(argv).wait()
+
+    @staticmethod
+    @step
+    def do_lvcreate(name, volumegroup, extents = None, size=None, blockdevices=None):
+        sync()
+        argv = ["/sbin/lvcreate", "-n", name]
+        if extents is not None:
+            argv.extend(["-l", extents])
+        if size is not None:
+            argv.extend(["-L", size])
+        argv.append(volumegroup)
+        if blockdevices is not None:
+            argv.extend(blockdevices)
+        print " ".join(argv)
+        return subprocess.Popen(argv).wait()
+
+    @staticmethod
+    @step
+    def do_lvconvert(name, type, poolmetadata=None, cachepool=None):
+        argv = ["/sbin/lvconvert", "--type", type, "-y"]
+        if poolmetadata is not None:
+            argv.extend(["--poolmetadata", poolmetadata])
+        if cachepool is not None:
+            argv.extend(["--cachepool", cachepool])
+        argv.append(name)
+        return subprocess.Popen(argv).wait()
+
+    @staticmethod
+    @step
+    def do_dmcache(volumegroup, logicalvolume, poolmetadata, pooldata, blockdevice, size):
+        Lvm.do_vgextend(volumegroup, [blockdevice])
+        meta_size = min(int(size)*1024/1000, 56)
+        Lvm.do_lvcreate(poolmetadata, volumegroup, size="%dM" % (meta_size))
+        Lvm.do_lvcreate(pooldata, volumegroup, size="%dG" % int(size))
+        Lvm.do_lvconvert("%s/%s" % (volumegroup, pooldata), type="cache-pool", poolmetadata="%s/%s" % (volumegroup, poolmetadata))
+        Lvm.do_lvconvert("%s/%s" % (volumegroup, logicalvolume), type="cache", cachepool="%s/%s" % (volumegroup, pooldata))
+
+
+class Fio(object):
     @staticmethod
     @checkscript
     def check_fio(script_yaml):
         script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults'].get('fio', 'fio'))
 
+    @staticmethod
+    def run_fio(fio, fio_script, opts = [], variables = {}, prepare=False):
+        (script_r, script_w) = os.pipe()
+        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
+        if len(opts) > 0:
+            fio_args.extend(opts)
+        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
+        os.close(script_r)
+
+        # Parse the fio script as a template
+        with open(fio_script, "r") as fio_script_file:
+            for line in fio_script_file:
+                try:
+                    os.write(script_w, string.Template(line).substitute(variables))
+                except KeyError as e:
+                    raise FioException("Unknown variable: %s" % e)
+                if prepare and line.find("[global]") >= 0:
+                    os.write(script_w, "create_only=1\n")
+                    continue
+        os.close(script_w)
+
+        fio_stdout = fio_process.communicate()[0]
+        status = fio_process.wait()
+        if status != 0:
+            raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
+        return fio_stdout
+
+    @staticmethod
+    def prepare_fio(label, fio, fio_script, opts=[], variables={}):
+        variables_clean = CommonCommands.get_fio_variables(label, variables)
+        CommonCommands.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
+
+    @staticmethod
+    def get_fio_variables(label, variables={}):
+        # if a variable is a dict, use the label as a key to the real value
+        variables_clean = {}
+        for (key, value) in variables.items():
+            if isinstance(value, type({})):
+                variables_clean[key] = value[label]
+            else:
+                variables_clean[key] = value
+        return variables_clean
+
+    @staticmethod
+    @step
+    def do_fio(label, fio, fio_script, opts=[], count=1, variables={}):
+        if isinstance(fio, FioException):
+            raise fio
+
+        variables_clean = CommonCommands.get_fio_variables(label, variables)
+
+        CommonCommands.prepare_fio(label, fio, fio_script, opts, variables)
+
+        flush_perms = True
+        for i in range(count):
+            sync()
+            if flush_perms:
+                try:
+                    with open('/proc/sys/vm/drop_caches', 'w') as drop_caches:
+                        drop_caches.write('3')
+                except IOError:
+                    flush_perms = False
+                    print "insufficient permissions to flush caches, results might be not reproductible"
+
+            fio_stdout = CommonCommands.run_fio(fio, fio_script, opts, variables_clean)
+
+            # The fio run output is cleaned to be parsable by a csv.reader
+            # don't parse error line, display them
+            for found in re.compile(r'^(\d+;fio-.*)?(.*)$', re.MULTILINE).findall(fio_stdout):
+                if len(found[0]) > 0:
+                    fio_stdout = found[0]
+                    break
+                elif len(found[1]) > 0:
+                    print found[1]
+            fio_stdout = fio_stdout.replace("%", "")
+
+            # a while because this regex will not manage two consecutive string
+            quote_string = re.compile(r'(^|;)([^;"\n]*[A-Za-z=][^;"\n]*)(;|$)')
+            while True:
+                # wrapping all textual values with a ".."
+                (fio_stdout, count) = quote_string.subn(r'\1"\2"\3', fio_stdout)
+                if count == 0:
+                    break
+            try:
+                cvs_line = csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next()
+                yield (label, cvs_line)
+            except ValueError as e:
+                raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
+
+
+# A class used as a container for command
+# To add a new command, just add a staticmethod to this class
+class CommonCommands(object):
     @staticmethod
     @step
     def do_unmount(mount_point=None, part=None, blockdevice=None):
@@ -463,7 +687,7 @@ class CommonCommands(object):
         if size == 0:
             input = "1,,,\n"
         else:
-            input = "1,%d,,\n" % size / sizeratio
+            input = "1,%d,,\n" % (size / sizeratio)
 
         sfdisk.communicate(input=input)
         if sfdisk.wait() == 0:
@@ -486,6 +710,7 @@ class CommonCommands(object):
         if stripsize != 0 and stripcount != 0:
             mkfs_args.extend(["-d", "su=%s" % (stripsize * 1024), "-d", "sw=%s" % stripcount])
         mkfs_args.append(part)
+        print " ".join(mkfs_args)
         return subprocess.Popen(mkfs_args).wait()
 
     @staticmethod
@@ -542,93 +767,6 @@ class CommonCommands(object):
                     f.write("%s" % value)
 
     @staticmethod
-    def run_fio(fio, fio_script, opts = [], variables = {}, prepare=False):
-        (script_r, script_w) = os.pipe()
-        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
-        if len(opts) > 0:
-            fio_args.extend(opts)
-        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
-        os.close(script_r)
-
-        # Parse the fio script as a template
-        with open(fio_script, "r") as fio_script_file:
-            for line in fio_script_file:
-                try:
-                    os.write(script_w, string.Template(line).substitute(variables))
-                except KeyError as e:
-                    raise FioException("Unknown variable: %s" % e)
-                if prepare and line.find("[global]") >= 0:
-                    os.write(script_w, "create_only=1\n")
-                    continue
-        os.close(script_w)
-
-        fio_stdout = fio_process.communicate()[0]
-        status = fio_process.wait()
-        if status != 0:
-            raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
-        return fio_stdout
-
-    @staticmethod
-    def prepare_fio(label, fio, fio_script, opts=[], variables={}):
-        variables_clean = CommonCommands.get_fio_variables(label, variables)
-        CommonCommands.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
-
-    @staticmethod
-    def get_fio_variables(label, variables={}):
-        # if a variable is a dict, use the label as a key to the real value
-        variables_clean = {}
-        for (key, value) in variables.items():
-            if isinstance(value, type({})):
-                variables_clean[key] = value[label]
-            else:
-                variables_clean[key] = value
-        return variables_clean
-
-    @staticmethod
-    @step
-    def do_fio(label, fio, fio_script, opts=[], count=1, variables={}):
-
-        variables_clean = CommonCommands.get_fio_variables(label, variables)
-
-        CommonCommands.prepare_fio(label, fio, fio_script, opts, variables)
-
-        flush_perms = True
-        for i in range(count):
-            sync()
-            if flush_perms:
-                try:
-                    with open('/proc/sys/vm/drop_caches', 'w') as drop_caches:
-                        drop_caches.write('3')
-                except IOError:
-                    flush_perms = False
-                    print "insufficient permissions to flush caches, results might be not reproductible"
-
-            fio_stdout = CommonCommands.run_fio(fio, fio_script, opts, variables_clean)
-
-            # The fio run output is cleaned to be parsable by a csv.reader
-            # don't parse error line, display them
-            for found in re.compile(r'^(\d+;fio-.*)?(.*)$', re.MULTILINE).findall(fio_stdout):
-                if len(found[0]) > 0:
-                    fio_stdout = found[0]
-                    break
-                elif len(found[1]) > 0:
-                    print found[1]
-            fio_stdout = fio_stdout.replace("%", "")
-
-            # a while because this regex will not manage two consecutive string
-            quote_string = re.compile(r'(^|;)([^;"\n]*[A-Za-z=][^;"\n]*)(;|$)')
-            while True:
-                # wrapping all textual values with a ".."
-                (fio_stdout, count) = quote_string.subn(r'\1"\2"\3', fio_stdout)
-                if count == 0:
-                    break
-            try:
-                cvs_line = csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next()
-                yield (label, cvs_line)
-            except ValueError as e:
-                raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
-
-    @staticmethod
     @step
     def clean(dir):
         try:
@@ -660,6 +798,25 @@ class CommonCommands(object):
             os.chdir(step)
         os.chdir(old_path)
 
+    @staticmethod
+    @checkscript
+    def check_fio(script_yaml):
+        script_yaml['defaults']['reboot'] = check_executable(script_yaml['defaults'].get('reboot', 'reboot'))
+
+    @staticmethod
+    @step
+    def reboot(reboot, skipfile, step):
+        if isinstance(reboot, FioException):
+            raise reboot
+        if os.path.isfile(skipfile):
+            with open(skipfile, "w") as f:
+                f.write("%d\n" % (step + 1))
+        sync()
+        status = subprocess.Popen([reboot]).wait()
+        if status == 0:
+            exit(0)
+        else:
+            return status
 
 def run_script(script):
     fio_values = []
@@ -683,6 +840,7 @@ def run_script(script):
 
 def run_yaml(script_yaml, skip):
     script = []
+    step = skip
     for cmd in script_yaml['run'][skip:]:
         # if the command is a plain string,
         # it's a command without arguments
@@ -708,17 +866,19 @@ def run_yaml(script_yaml, skip):
                 kwargs[arg_name] = script_yaml['variables']
             elif arg_name in script_yaml['defaults']:
                 kwargs[arg_name] = script_yaml['defaults'][arg_name]
+            elif arg_name == 'step':
+                kwargs[arg_name] = step
         # not all arguments from the yaml file used, something is wrong
         if len(cmd_args) > 0:
             raise FioException("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
         script.append((cmd_func, kwargs))
-
+        step += 1
     return run_script(script)
 
 
 def plot(fio_values, mode="bw", filename=None, title=None):
     column_labels = ["<=2", "4", "10", "20", "50", "100", "250", "500", "1000", "2000", ">=2000"]
-
+    latencies_steps = [2, 4, 10, 20, 50, 100, 250, 500, 1000, 2000, 5000]
     row_labels = []
     ms_values = []
     bw_values_read = []
@@ -734,27 +894,27 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         ms_values.append(row.latencies)
 
     x = numpy.arange(len(ms_values))
-    y = numpy.arange(len(ms_values[0]))
+    y = numpy.array(latencies_steps[:])
     X, Y = numpy.meshgrid(x, y)
 
     waitarray = numpy.array(ms_values).transpose()
     maxwait = numpy.amax(ms_values)
     normalized = waitarray / maxwait * 1000
 
-    # fig = Figure(subplotpars=SubplotParams(right=0.85, left=0.85))
-    fig = Figure()
+    fig = Figure(subplotpars=SubplotParams(left=0.1, right=0.85, bottom=0.05))
     if title is not None:
         fig.suptitle(title)
     ax2 = fig.add_subplot(1, 1, 1)
     ax1 = ax2.twinx()
 
-    ax1.set_xticks(numpy.arange(len(row_labels)), minor=False)
-    ax1.set_xticklabels(row_labels, minor=False)
-    ax1.set_xlim(-0.5, len(row_labels) - 0.5)
+    ax2.set_xticks(numpy.arange(len(row_labels)), minor=False)
+    ax2.set_xticklabels(row_labels, minor=False)
+    ax2.set_xlim(-0.5, len(row_labels) - 0.5)
 
-    ax1.set_ylim(bottom=-1, top=11)
-    ax1.set_yticks(range(len(column_labels)))
+    #ax1.set_ylim(bottom=-1, top=11)
+    ax1.set_yticks(latencies_steps)
     ax1.set_yticklabels(column_labels, minor=False)
+    ax1.set_yscale('log')
 
     colors_range = [[2, 4, 10, 20, 50, 100, 250, 500, 1000, 2000, 5000]]
     colors = numpy.array(colors_range * len(row_labels)).transpose()
@@ -768,8 +928,8 @@ def plot(fio_values, mode="bw", filename=None, title=None):
     for bucket in ("90.00", "95.00", "99.00"):
         current = map(lambda x: x.read_percentiles[bucket], fio_values)
         alpha /= 2
-        #ax1.plot(current, 'b.-', alpha=alpha)
-        ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='blue', alpha=alpha)
+        ax1.plot(current, 'b-', alpha=alpha)
+        #ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='blue', alpha=alpha)
         previous = current
 
     previous = map(lambda x: x.write_percentiles["50.00"], fio_values)
@@ -778,8 +938,8 @@ def plot(fio_values, mode="bw", filename=None, title=None):
     for bucket in ("90.00", "95.00", "99.00"):
         current = map(lambda x: x.write_percentiles[bucket], fio_values)
         alpha /= 2
-        #ax1.plot(current, 'b.-', alpha=alpha)
-        ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='green', alpha=alpha)
+        ax1.plot(current, 'g-', alpha=alpha)
+        #ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='green', alpha=alpha)
         previous = current
 
     # Draw the bw or io/s line
@@ -846,6 +1006,29 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         matplotlib.pyplot.show(fig)
 
 
+def plot2(fio_values, mode="bw", filename=None, title=None):
+    fig = Figure(subplotpars=SubplotParams(left=0.1, right=0.85, bottom=0.05))
+    if title is not None:
+        fig.suptitle(title)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xscale('log')
+    plotted = []
+    for row in fio_values:
+        reversed = map(lambda (x,y) : [y, float(x)], row.read_percentiles.items())
+        values = numpy.sort(reversed, axis=0).transpose()
+        plotted.extend(ax.plot(values[0], values[1],"-.", label="%s read" % row.label))
+    plotted.reverse()
+    for row in fio_values:
+        previous = plotted.pop()
+        reversed = map(lambda (x,y) : [y, float(x)], row.write_percentiles.items())
+        values = numpy.sort(reversed, axis=0).transpose()
+        ax.plot(values[0], values[1],"-+", color=previous.get_color(), label="%s write" % row.label)
+    ax.set_xlim(0.5, 5000)
+    # plotted, map(lambda x: x.label, fio_values), ,
+    ax.legend(loc='lower right')
+    canvas = FigureCanvasBase(fig)
+    canvas.print_figure(filename)
+
 def save_csv(fio_values, filename):
     with open(filename, 'wb') as csvfile:
         cvsoutput = csv.writer(csvfile, delimiter=',',
@@ -876,11 +1059,11 @@ def check_executable(filename):
     if filename_path is not None:
         try:
             if not os.access(filename_path, os.X_OK):
-                raise FioException("no executable command '%s'" % filename_path)
+                return FioException("no executable command '%s'" % filename_path)
         except OSError as e:
-            raise FioException("no valid command path '%s': '%s'" % (filename_path, e))
+            return FioException("no valid command path '%s': '%s'" % (filename_path, e))
     else:
-        raise FioException("command '%s' not found in path" % filename)
+        return FioException("command '%s' not found in path" % filename)
     return filename_path
 
 
@@ -935,6 +1118,7 @@ def read_yaml(filename, template, defaults, variables, skip):
             args['fio_values'] = fio_values
             exec_embeded_plot(**args)
 
+
 def main():
     parser = OptionParser(usage="\n%prog [options] yaml_script+\n%prog -c [options] csv_values+")
 
@@ -942,7 +1126,8 @@ def main():
     yaml_group.add_option("-V", "--variable", dest="variables", action="append", default=[])
     yaml_group.add_option("-D", "--default", dest="defaults", action="append", default=[])
     yaml_group.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
-    yaml_group.add_option("-S", "--skip", action="store", dest="skip", default=0, type=type(0))
+    yaml_group.add_option("-s", "--skip", action="store", dest="skip", default=0, type=type(0))
+    yaml_group.add_option("-S", "--skipfile", action="store", dest="skipfile", default=None)
     yaml_group.add_option("-t", "--template", action="store", dest="template", default=None)
 
     parser.add_option_group(yaml_group)
@@ -981,6 +1166,26 @@ def main():
         (key, value) = default.split("=")
         variables[key] = value
 
+    if options.skipfile is not None:
+        try:
+            if os.path.isfile(options.skipfile):
+                with open(options.skipfile, "r") as f:
+                    skipline = f.read()
+                    if len(skipline) == 0:
+                        options.skip = 0
+                    else:
+                        options.skip = int(skipline)
+            else:
+                with open(options.skipfile, "w") as f:
+                    f.write("%d\n" % 0)
+            defaults['skipfile'] = options.skipfile
+        except IOError as e:
+            print e
+            exit(1)
+        except ValueError as e:
+            print "cant parse skipe file %s content: '%s'" % (options.skipfile, skipline)
+            exit(1)
+
     if len(args) == 0:
         parser.print_usage()
         exit(1)
@@ -995,9 +1200,8 @@ def main():
     else:
         if options.yaml is not None:
             try:
-                yaml_file = open(options.yaml)
-                script_yaml = yaml.safe_load(yaml_file)
-                yaml_file.close()
+                with open(options.yaml, "r") as yaml_file:
+                    script_yaml = yaml.safe_load(yaml_file)
                 graph_mode  = script_yaml['plot']['mode']
                 png_output  = script_yaml['plot']['filename']
                 graph_title = script_yaml['plot']['title']

@@ -105,6 +105,8 @@ Actions
    * ld (mandatory): the logical drive
    * stripsize: a possible stripsize to use
    * size: define a ld size, in megabyte
+   * type: the type of logical drive to create, can be ld, ldcache or arrayr0
+   * datald: if type is ldcache, define the ld to cache
 
 * do_cciss_add_ld
 
@@ -259,10 +261,18 @@ For example, by adding the following section to the yaml file:
 
 The do_fio commands with label A, B, C will run the fio script with substituting the variable ${size} with the respective value "1G", "2G", "4G"
 
-Variables
+Templates
 =========
 
 fiorun can run many yaml scripts. If a template is provided in command line, default values for each sections will be used.
 Then each yaml script can be reduced to a bare minimum.
 
 Sections 'defaults', 'variables', 'plot', 'csv' are merged. Section 'run' is totally replaced.
+
+Reboot
+======
+
+fiorun can be run accross reboot, if the kernel must be reset, modules unloaded.
+
+The action `reboot` is used for that, it takes no argument. It will use a file to store the current step and restart at
+the next one. One should add `-S .../fiorun.skip` to command line arguments
