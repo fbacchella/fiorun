@@ -14,6 +14,8 @@ import sys
 import time
 from optparse import OptionParser, OptionGroup
 
+from tempfile import mkdtemp
+os.environ['MPLCONFIGDIR'] = mkdtemp()
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import FuncFormatter
@@ -51,12 +53,14 @@ except:
 class FioException(Exception):
     pass
 
+
 # An exception used to store a figure
 class FigureContainer(Exception):
-    figure = property(lambda x: x._figure, None, None, "figure")
+    figure = property(lambda self: self._figure, None, None, "figure")
 
     def __init__(self, figure):
         self._figure = figure
+
     def __str__(self):
         return repr(self._figure)
 
@@ -67,6 +71,24 @@ def check_dev(blockdevice):
         return stat.S_ISBLK(blockdev.st_mode)
     except Exception as e:
         return False
+
+units = {
+    'T': 1099511627776,
+    'G': 1073741824,
+    'M': 1048576,
+    'K': 1024,
+    'k': 1024,
+    '': 1,
+}
+size_re = re.compile('(\\d+)([TGMKk]?)');
+
+def parse_size(input_size, out_suffix=""):
+    matcher = size_re.match("%s" % input_size)
+    if matcher is not None:
+        value = float(matcher.group(1))
+        suffix = matcher.group(2)
+        return value * units[suffix] / units[out_suffix]
+
 
 # Define the register command decorator
 stepsfuncs = {}
@@ -86,17 +108,17 @@ def checkscript(func, *args, **kwargs):
 
 
 class FioStat(object):
-    label = property(lambda x: x._label, None, None, "label")
-    values = property(lambda x: x._values, None, None, "all fio values")
-    version = property(lambda x: x._values[0], None, None, "data version")
-    read_bw = property(lambda x: x._values[6], None, None, "read bandwith")
-    write_bw = property(lambda x: x._values[47], None, None, "write bandwith")
-    read_iops = property(lambda x: x._values[7], None, None, "read iop/s")
-    write_iops = property(lambda x: x._values[48], None, None, "write iop/s")
+    label = property(lambda self: self._label, None, None, "label")
+    values = property(lambda self: self._values, None, None, "all fio values")
+    version = property(lambda self: self._values[0], None, None, "data version")
+    read_bw = property(lambda self: self._values[6], None, None, "read bandwith")
+    write_bw = property(lambda self: self._values[47], None, None, "write bandwith")
+    read_iops = property(lambda self: self._values[7], None, None, "read iop/s")
+    write_iops = property(lambda self: self._values[48], None, None, "write iop/s")
     # join µs to 2ms, skip 75ms and 750ms
-    latencies  = property(lambda x: [reduce(lambda x,y: x+y, x._values[99:110])] + x._values[110:117] + [reduce(lambda x,y: x+y, x._values[117:119])]+ x._values[119:121], None, None, "IO latencies")
-    read_percentiles = property(lambda x : x._read_percentiles, None, None, "read latencies bucket")
-    write_percentiles = property(lambda x : x._write_percentiles, None, None, "write latencies bucket")
+    latencies  = property(lambda self: [reduce(lambda x,y: x+y, self._values[99:110])] + self._values[110:117] + [reduce(lambda x,y: x+y, self._values[117:119])]+ self._values[119:121], None, None, "IO latencies")
+    read_percentiles = property(lambda self : self._read_percentiles, None, None, "read latencies bucket")
+    write_percentiles = property(lambda self : self._write_percentiles, None, None, "write latencies bucket")
 
     def __init__(self, label, values):
         if len(values) < 1:
@@ -106,11 +128,12 @@ class FioStat(object):
         if self.version == 3 and len(values) < 120:
             raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
         self._read_percentiles = {}
-        for (key,value) in map(lambda x: x.split("="), self._values[17:37]):
+        for (key, value) in map(lambda x: x.split("="), self._values[17:37]):
             self._read_percentiles[key] = int(value) / 1000.0
         self._write_percentiles = {}
-        for (key,value) in map(lambda x: x.split("="), self._values[58:78]):
+        for (key, value) in map(lambda x: x.split("="), self._values[58:78]):
             self._write_percentiles[key] = int(value) / 1000.0
+
 
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
@@ -123,7 +146,6 @@ class CcissSteps(object):
         elif array is not None:
             select.extend(["array", "%s" % array])
         return select
-
 
     @staticmethod
     def get_cciss_info(hpacucli, slot, ld=None, array=None):
@@ -180,6 +202,8 @@ class CcissSteps(object):
             keys.sort()
             keys.reverse()
             ld_info = ld_list[keys[0]]
+        else:
+            ld_info = {}
         if 'Disk Name' in ld_info:
             with open(ld_info['Disk Name'], 'wb', 0) as out:
                 out.write("0")
@@ -293,7 +317,7 @@ class CcissSteps(object):
         if stripsize > 0:
             argv.append("ss=%s" % stripsize)
         if size > 0:
-            argv.append("size=%s" % size)
+            argv.append("size=%s" % parse_size(size, 'M'))
         if type == 'ldcache' and datald is not None:
             argv.append("datald=%s" % datald)
         print " ".join(argv)
@@ -373,18 +397,22 @@ class ZFS(object):
 
     @staticmethod
     @step
-    def do_create_zpool(zpool, name, vdev, properties={}, mount_point=None):
+    def do_create_zpool(zpool, name, vdev, pool_properties={}, fs_properties={}, mount_point=None):
         if isinstance(zpool, FioException):
             raise zpool
         sync()
         ZFS.do_destroy_zpool(zpool, name)
-        argv = [zpool, "create", name ]
-        if len(properties) > 0:
-            for (key, value) in properties.items():
-                argv.append("-o %s=%s" % (key, value))
+        argv = [zpool, "create", "-f", name ]
+        if len(pool_properties) > 0:
+            for (key, value) in pool_properties.items():
+                argv.extend(["-o", "%s=%s" % (key, value)])
+        if len(fs_properties) > 0:
+            for (key, value) in fs_properties.items():
+                argv.extend(["-O", "%s=%s" % (key, value)])
         if mount_point is not None:
             argv.extend(["-m", mount_point])
         argv.extend(vdev)
+        print " ".join(argv)
         zpoolp = subprocess.Popen(argv, stdin=None)
         status = zpoolp.wait()
         if status != 0:
@@ -431,7 +459,7 @@ class CGroup(object):
 
         with os.fdopen(csv_w_fd, 'w') as csv_w:
             cvsoutput = csv.writer(csv_w, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
-            for (label, values) in CommonCommands.do_fio(**kwargs):
+            for (label, values) in Fio.do_fio(**kwargs):
                 cvsoutput.writerow([label] + values)
         exit(0)
 
@@ -542,6 +570,14 @@ class Fio(object):
         script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults'].get('fio', 'fio'))
 
     @staticmethod
+    @checkscript
+    def check_fio_scripts(script_yaml):
+        fio_scripts = check_executable(script_yaml['defaults'].get('fio_scripts', 'fio_scripts'))
+        if not isinstance(fio_scripts, FioException) and not os.path.isdir(fio_scripts):
+            fio_scripts = FioException("fio_scripts is not a folder: %s" % fio_scripts)
+        script_yaml['defaults']['fio_scripts'] = fio_scripts
+
+    @staticmethod
     def run_fio(fio, fio_script, opts = [], variables = {}, prepare=False):
         (script_r, script_w) = os.pipe()
         fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
@@ -570,8 +606,8 @@ class Fio(object):
 
     @staticmethod
     def prepare_fio(label, fio, fio_script, opts=[], variables={}):
-        variables_clean = CommonCommands.get_fio_variables(label, variables)
-        CommonCommands.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
+        variables_clean = Fio.get_fio_variables(label, variables)
+        Fio.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
 
     @staticmethod
     def get_fio_variables(label, variables={}):
@@ -590,9 +626,9 @@ class Fio(object):
         if isinstance(fio, FioException):
             raise fio
 
-        variables_clean = CommonCommands.get_fio_variables(label, variables)
+        variables_clean = Fio.get_fio_variables(label, variables)
 
-        CommonCommands.prepare_fio(label, fio, fio_script, opts, variables)
+        Fio.prepare_fio(label, fio, fio_script, opts, variables)
 
         flush_perms = True
         for i in range(count):
@@ -629,6 +665,33 @@ class Fio(object):
                 yield (label, cvs_line)
             except ValueError as e:
                 raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
+
+    @staticmethod
+    @step
+    def run_fio_scripts(fio_scripts, fio, result_folder, run_folder, directio=False, runtime=None, size=None, tests=['readrand', 'read', 'write', 'randrw']):
+        if isinstance(fio_scripts, FioException):
+            raise fio_scripts
+        argv = ["%s/fio.sh" % fio_scripts]
+        if not os.path.isdir(result_folder):
+            if not os.path.exists(result_folder):
+                os.makedirs(result_folder)
+            else:
+                raise FioException("results folder %s is not a directory" % result_folder)
+        argv.extend(["-o", result_folder])
+        if directio:
+            argv.extend(["-d", "1"])
+        else:
+            argv.extend(["-d", "0"])
+        if runtime is not None:
+            argv.extend(["-s", "%s" % runtime])
+        if size is not None:
+            argv.extend(["-m", "%s" % int(parse_size(size, 'M'))])
+        argv.extend(["-b", fio])
+        argv.extend(["-w", run_folder])
+        argv.extend(["-t", " ".join(tests)])
+        print " ".join(argv)
+        status = subprocess.Popen(argv, stdin=subprocess.PIPE).wait()
+        return status
 
 
 # A class used as a container for command
@@ -720,7 +783,7 @@ class CommonCommands(object):
         sync()
         if not os.path.isdir(mount_point):
             if not os.path.exists(mount_point):
-                os.mkdir(mount_point)
+                os.makedirs(mount_point)
             else:
                 raise FioException("mount point %s is not a directory" % mount_point)
         mount_args = ["mount", "-t", fs_type]
@@ -818,6 +881,7 @@ class CommonCommands(object):
         else:
             return status
 
+
 def run_script(script):
     fio_values = []
     for (f, kwargs) in script:
@@ -838,10 +902,10 @@ def run_script(script):
     return fio_values
 
 
-def run_yaml(script_yaml, skip):
+def run_yaml(script_yaml, start, end):
     script = []
-    step = skip
-    for cmd in script_yaml['run'][skip:]:
+    step = start
+    for cmd in script_yaml['run'][start:end]:
         # if the command is a plain string,
         # it's a command without arguments
         if type(cmd) == type(""):
@@ -1014,7 +1078,7 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     ax.set_xscale('log')
     plotted = []
     for row in fio_values:
-        reversed = map(lambda (x,y) : [y, float(x)], row.read_percentiles.items())
+        reversed = map(lambda (x, y) : [y, float(x)], row.read_percentiles.items())
         values = numpy.sort(reversed, axis=0).transpose()
         plotted.extend(ax.plot(values[0], values[1],"-.", label="%s read" % row.label))
     plotted.reverse()
@@ -1028,6 +1092,7 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     ax.legend(loc='lower right')
     canvas = FigureCanvasBase(fig)
     canvas.print_figure(filename)
+
 
 def save_csv(fio_values, filename):
     with open(filename, 'wb') as csvfile:
@@ -1045,12 +1110,14 @@ def read_csv(filename, values=[]):
                 values.append(FioStat(row[0], row[1:]))
     return values
 
+
 def exec_embeded_plot(code, **kwargs):
     try:
         exec code in globals(), kwargs
     except FigureContainer as e:
         canvas = FigureCanvasBase(e.figure)
         canvas.print_figure(kwargs['filename'])
+
 
 def check_executable(filename):
     if filename is None:
@@ -1067,13 +1134,13 @@ def check_executable(filename):
     return filename_path
 
 
-def read_yaml(filename, template, defaults, variables, skip):
+def read_yaml(filename, template, defaults, variables, skip, end):
     try:
         yaml_file = open(filename)
         script_yaml = yaml.safe_load(yaml_file)
         yaml_file.close()
-    except yaml.parser.ParserError as e:
-        print "invalid file %s:" % filename
+    except (yaml.parser.ParserError,yaml.scanner.ScannerError)  as e:
+        print "invalid yaml file %s:" % filename
         print e
         return
 
@@ -1107,9 +1174,9 @@ def read_yaml(filename, template, defaults, variables, skip):
     for f in checkscriptfunc:
         f(script_yaml)
 
-    fio_values = run_yaml(script_yaml, skip)
+    fio_values = run_yaml(script_yaml, skip, end)
     if len(fio_values) > 0:
-        if ('csv' in script_yaml):
+        if 'csv' in script_yaml:
             save_csv(fio_values, **script_yaml['csv'])
         if 'code' not in script_yaml['plot']:
             plot(fio_values, **script_yaml['plot'])
@@ -1126,15 +1193,16 @@ def main():
     yaml_group.add_option("-V", "--variable", dest="variables", action="append", default=[])
     yaml_group.add_option("-D", "--default", dest="defaults", action="append", default=[])
     yaml_group.add_option("-v", "--verbose", action="store_true", dest="verbose", default=False)
-    yaml_group.add_option("-s", "--skip", action="store", dest="skip", default=0, type=type(0))
+    yaml_group.add_option("-s", "--skip", action="store", dest="skip", default=None, type=type(0))
     yaml_group.add_option("-S", "--skipfile", action="store", dest="skipfile", default=None)
+    yaml_group.add_option("-1", "--onestep", action="store", dest="onestep", default=None, type=type(0))
     yaml_group.add_option("-t", "--template", action="store", dest="template", default=None)
 
     parser.add_option_group(yaml_group)
 
     csv_group = OptionGroup(parser, "Plot from a list of csv")
     csv_group.add_option("-c", "--csv", action="store_true", dest="csv_input", default=False)
-    csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default=None, type="choice", choices=("bw", "iops") )
+    csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default=None, type="choice", choices=("bw", "iops"))
     csv_group.add_option("-p", "--png", action="store", dest="png_output", default=None, type=type(""))
     csv_group.add_option("-T", "--title", action="store", dest="graph_title", default=None, type=type(""))
     csv_group.add_option("-Y", "--yaml", action="store", dest="yaml", default=None, type=type(""))
@@ -1154,6 +1222,11 @@ def main():
     else:
         template = None
 
+    variables = {}
+    for default in options.variables:
+        (key, value) = default.split("=")
+        variables[key] = value
+
     defaults = {}
     for default in options.defaults:
         (key, value) = default.split("=")
@@ -1161,20 +1234,17 @@ def main():
             value = int(value)
         defaults[key] = value
 
-    variables = {}
-    for default in options.variables:
-        (key, value) = default.split("=")
-        variables[key] = value
-
+    # check the range of steps to run
+    # default to None, means everything as [None:None] select the whole array
+    start = None
+    end = None
     if options.skipfile is not None:
         try:
             if os.path.isfile(options.skipfile):
                 with open(options.skipfile, "r") as f:
                     skipline = f.read()
-                    if len(skipline) == 0:
-                        options.skip = 0
-                    else:
-                        options.skip = int(skipline)
+                    if len(skipline) != 0:
+                        start = int(skipline)
             else:
                 with open(options.skipfile, "w") as f:
                     f.write("%d\n" % 0)
@@ -1185,6 +1255,11 @@ def main():
         except ValueError as e:
             print "cant parse skipe file %s content: '%s'" % (options.skipfile, skipline)
             exit(1)
+    elif options.onestep is not None:
+        start = options.onestep
+        end = options.onestep + 1
+    elif options.skip is not None:
+        start = options.skip
 
     if len(args) == 0:
         parser.print_usage()
@@ -1193,7 +1268,7 @@ def main():
     if not options.csv_input:
         for file_use in args:
             try:
-                read_yaml(file_use, template, defaults, variables, options.skip)
+                read_yaml(file_use, template, defaults, variables, start, end)
             except FioException as e:
                 print e
                 break
@@ -1202,8 +1277,8 @@ def main():
             try:
                 with open(options.yaml, "r") as yaml_file:
                     script_yaml = yaml.safe_load(yaml_file)
-                graph_mode  = script_yaml['plot']['mode']
-                png_output  = script_yaml['plot']['filename']
+                graph_mode = script_yaml['plot']['mode']
+                png_output = script_yaml['plot']['filename']
                 graph_title = script_yaml['plot']['title']
             except yaml.parser.ParserError as e:
                 print "invalid file %s:" % options.yaml
