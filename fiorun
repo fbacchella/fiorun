@@ -883,10 +883,12 @@ class CommonCommands(object):
             return status
 
 
-def run_script(script):
+def run_script(script, debug):
     fio_values = []
     for (f, kwargs) in script:
-        print "step %s(%s)" % (f.__name__, kwargs)
+        print "******* %s(%s)" % (f.__name__, kwargs)
+        if debug:
+            continue
         try:
             execute = f(**kwargs)
         except TypeError as e:
@@ -903,7 +905,7 @@ def run_script(script):
     return fio_values
 
 
-def run_yaml(script_yaml, start, end):
+def run_yaml(script_yaml, start, end, debug):
     script = []
     step = 0
     if start is not None:
@@ -940,7 +942,7 @@ def run_yaml(script_yaml, start, end):
             raise FioException("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
         script.append((cmd_func, kwargs))
         step += 1
-    return run_script(script)
+    return run_script(script, debug)
 
 
 def plot(fio_values, mode="bw", filename=None, title=None):
@@ -1137,7 +1139,7 @@ def check_executable(filename):
     return filename_path
 
 
-def read_yaml(filename, template, defaults, variables, skip, end):
+def read_yaml(filename, template, defaults, variables, skip, end, debug):
     try:
         yaml_file = open(filename)
         script_yaml = yaml.safe_load(yaml_file)
@@ -1180,7 +1182,7 @@ def read_yaml(filename, template, defaults, variables, skip, end):
     for f in checkscriptfunc:
         f(script_yaml)
 
-    fio_values = run_yaml(script_yaml, skip, end)
+    fio_values = run_yaml(script_yaml, skip, end, debug)
     if len(fio_values) > 0:
         if 'csv' in script_yaml:
             save_csv(fio_values, **script_yaml['csv'])
@@ -1203,6 +1205,7 @@ def main():
     yaml_group.add_option("-S", "--skipfile", action="store", dest="skipfile", default=None)
     yaml_group.add_option("-1", "--onestep", action="store", dest="onestep", default=None, type=type(0))
     yaml_group.add_option("-t", "--template", action="store", dest="template", default=None)
+    yaml_group.add_option("-d", "--debug", action="store_true", dest="debug", default=False)
 
     parser.add_option_group(yaml_group)
 
@@ -1274,7 +1277,7 @@ def main():
     if not options.csv_input:
         for file_use in args:
             try:
-                read_yaml(file_use, template, defaults, variables, start, end)
+                read_yaml(file_use, template, defaults, variables, start, end, options.debug)
             except FioException as e:
                 print e
                 break
