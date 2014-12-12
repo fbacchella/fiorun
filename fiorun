@@ -317,7 +317,7 @@ class CcissSteps(object):
         if stripsize > 0:
             argv.append("ss=%s" % stripsize)
         if size > 0:
-            argv.append("size=%s" % parse_size(size, 'M'))
+            argv.append("size=%s" % int(parse_size(size, 'M')))
         if type == 'ldcache' and datald is not None:
             argv.append("datald=%s" % datald)
         print " ".join(argv)
@@ -771,7 +771,8 @@ class CommonCommands(object):
         if logdev:
             mkfs_args.extend(["-l", "logdev=%s" % logdev, "-l", "size=2136997888"])
         if stripsize != 0 and stripcount != 0:
-            mkfs_args.extend(["-d", "su=%s" % (stripsize * 1024), "-d", "sw=%s" % stripcount])
+            stripsize = int(parse_size(stripsize, ''))
+            mkfs_args.extend(["-d", "su=%d" % stripsize, "-d", "sw=%s" % stripcount])
         mkfs_args.append(part)
         print " ".join(mkfs_args)
         return subprocess.Popen(mkfs_args).wait()
@@ -904,7 +905,9 @@ def run_script(script):
 
 def run_yaml(script_yaml, start, end):
     script = []
-    step = start
+    step = 0
+    if start is not None:
+        step = 0
     for cmd in script_yaml['run'][start:end]:
         # if the command is a plain string,
         # it's a command without arguments
@@ -1169,6 +1172,9 @@ def read_yaml(filename, template, defaults, variables, skip, end):
         script_yaml['variables'] = {}
     for (key, value) in variables.items():
         script_yaml['variables'][key] = value
+
+    parsed = string.Template(yaml.dump(script_yaml)).substitute(script_yaml['variables'])
+    script_yaml = yaml.safe_load(parsed)
 
     # check the executable path
     for f in checkscriptfunc:
