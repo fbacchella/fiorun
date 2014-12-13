@@ -24,6 +24,8 @@ import matplotlib
 import matplotlib.cm
 import numpy
 import yaml
+import fcntl
+import struct
 
 from distutils import spawn
 
@@ -508,13 +510,18 @@ class Lvm(object):
     @staticmethod
     @step
     def do_pvcreate(blockdevice=None):
-        sync()
+        req = 0x80081272 # BLKGETSIZE64, result is bytes as unsigned 64-bit integer (uint64)
+        with open(blockdevice, 'w') as dev:
+            buf = fcntl.ioctl(dev.fileno(), req, ' ' * 8)
+            size64 = struct.unpack('L', buf)[0]
+            dev.write('\0' * 4096)
+            dev.seek(size64 - 4096)
+            dev.write('\0' * 4096)
         return subprocess.Popen(["/sbin/pvcreate", "-ff", "-y", blockdevice]).wait()
 
     @staticmethod
     @step
     def do_vgcreate(name, blockdevices):
-        sync()
         argv = ["/sbin/vgcreate", name]
         argv.extend(blockdevices)
         return subprocess.Popen(argv).wait()
