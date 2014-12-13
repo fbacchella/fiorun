@@ -579,8 +579,8 @@ class Fio(object):
     @staticmethod
     @checkscript
     def check_fio_scripts(script_yaml):
-        fio_scripts = check_executable(script_yaml['defaults'].get('fio_scripts', 'fio_scripts'))
-        if not isinstance(fio_scripts, FioException) and not os.path.isdir(fio_scripts):
+        fio_scripts = script_yaml['defaults'].get('fio_scripts', 'fio_scripts')
+        if not os.path.isdir(fio_scripts):
             fio_scripts = FioException("fio_scripts is not a folder: %s" % fio_scripts)
         script_yaml['defaults']['fio_scripts'] = fio_scripts
 
@@ -916,7 +916,7 @@ def run_yaml(script_yaml, start, end, debug):
     script = []
     step = 0
     if start is not None:
-        step = 0
+        step = start
     for cmd in script_yaml['run'][start:end]:
         # if the command is a plain string,
         # it's a command without arguments
