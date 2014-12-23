@@ -242,6 +242,7 @@ class CcissSteps(object):
     def wait_cciss_ld(hpacucli, slot, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
+        sync()
         while True:
             ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
             if len(ld_list) == 0:
@@ -277,10 +278,10 @@ class CcissSteps(object):
                     blockdevice = ld_info['Disk Name']
                     if check_dev(blockdevice):
                         for mount_info in ld_info['Mount Points'].split(','):
-                            if mount_info.strip() == 'None':
-                                continue
-                            mount_point = mount_info.strip().split(' ')[0]
-                            CommonCommands.do_unmount(mount_point=mount_point)
+                            if mount_info.strip() != 'None':
+                                mount_point = mount_info.strip().split(' ')[0]
+                                CommonCommands.do_unmount(mount_point=mount_point)
+                        CommonCommands.clean_drive(blockdevice)
             argv = [hpacucli]
             argv.extend(CcissSteps.get_cciss_select(slot=slot, array=array, ld=ld))
             argv.extend(["delete", "forced"])
@@ -358,6 +359,7 @@ class CcissSteps(object):
         for drive in drives:
             hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive], stdin=None)
             status = hpacuclip.wait()
+            sync()
             if status != 0:
                 return status
         return 0
@@ -403,7 +405,6 @@ class ZFS(object):
         if isinstance(zpool, FioException):
             raise zpool
         sync()
-        ZFS.do_destroy_zpool(zpool, name)
         argv = [zpool, "create", "-f", name ]
         if len(pool_properties) > 0:
             for (key, value) in pool_properties.items():
@@ -510,13 +511,7 @@ class Lvm(object):
     @staticmethod
     @step
     def do_pvcreate(blockdevice=None):
-        req = 0x80081272 # BLKGETSIZE64, result is bytes as unsigned 64-bit integer (uint64)
-        with open(blockdevice, 'w') as dev:
-            buf = fcntl.ioctl(dev.fileno(), req, ' ' * 8)
-            size64 = struct.unpack('L', buf)[0]
-            dev.write('\0' * 4096)
-            dev.seek(size64 - 4096)
-            dev.write('\0' * 4096)
+        CommonCommands.clean_drive(blockdevice)
         return subprocess.Popen(["/sbin/pvcreate", "-ff", "-y", blockdevice]).wait()
 
     @staticmethod
@@ -537,7 +532,7 @@ class Lvm(object):
     @step
     def do_lvcreate(name, volumegroup, extents = None, size=None, blockdevices=None):
         sync()
-        argv = ["/sbin/lvcreate", "-n", name]
+        argv = ["/sbin/lvcreate", "-n", name, "-y"]
         if extents is not None:
             argv.extend(["-l", extents])
         if size is not None:
@@ -704,6 +699,19 @@ class Fio(object):
 # A class used as a container for command
 # To add a new command, just add a staticmethod to this class
 class CommonCommands(object):
+
+    @staticmethod
+    @step
+    def clean_drive(blockdevice):
+        CommonCommands.do_unmount(blockdevice=blockdevice)
+        req = 0x80081272 # BLKGETSIZE64, result is bytes as unsigned 64-bit integer (uint64)
+        with open(blockdevice, 'w') as dev:
+            buf = fcntl.ioctl(dev.fileno(), req, ' ' * 8)
+            size64 = struct.unpack('L', buf)[0]
+            dev.write('\0' * 1024 * 1024 )
+            dev.seek(size64 - 1024 * 1024)
+            dev.write('\0' * 1024 * 1024)
+
     @staticmethod
     @step
     def do_unmount(mount_point=None, part=None, blockdevice=None):
