@@ -11,8 +11,15 @@ import stat
 import string
 import subprocess
 import sys
-import time
 from optparse import OptionParser, OptionGroup
+import numpy
+import yaml
+import fcntl
+import struct
+import signal
+import time
+import cStringIO
+from distutils import spawn
 
 from tempfile import mkdtemp
 os.environ['MPLCONFIGDIR'] = mkdtemp()
@@ -22,12 +29,6 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import LogNorm
 import matplotlib
 import matplotlib.cm
-import numpy
-import yaml
-import fcntl
-import struct
-
-from distutils import spawn
 
 try:
     import platform
@@ -54,6 +55,28 @@ except:
 # used to catch managed exception and errors
 class FioException(Exception):
     pass
+
+class ProcessException(FioException):
+    def __init__(self, command, argv, status, stdout, stderr):
+        self.command = command
+        self.argv = argv
+        self.status = status
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def __str__(self):
+        str_out = ""
+        for l in cStringIO.StringIO(self.stdout):
+            str_out += "**** %s\n" % l
+        str_err = ""
+        for l in cStringIO.StringIO(self.stderr):
+            str_err += "**** %s\n" % l
+        output = """command %s failed
+    %s
+stdout:
+%sstderr:
+%s""" % (self.command, " ".join(self.argv), str_out, str_err)
+        return output
 
 
 # An exception used to store a figure
@@ -155,10 +178,8 @@ class CcissSteps(object):
         argv = [hpacucli]
         argv.extend(CcissSteps.get_cciss_select(slot=slot))
         argv.extend(["ld", "all", "show", "detail"])
-        check_ld = subprocess.Popen(argv, stdin=None, stdout=subprocess.PIPE)
-        output = check_ld.communicate()[0]
-        if check_ld.wait() != 0:
-            return {}
+        check_ld = Executor(argv).run()
+        output = check_ld.stdoutdata
         values = {}
         current_array = ""
         ld_list = {}
@@ -215,7 +236,7 @@ class CcissSteps(object):
     def check_cciss(script_yaml):
         # hpacucli is not mandatory, don't failed on it
         try:
-            script_yaml['defaults']['hpacucli'] = check_executable(script_yaml['defaults'].get('hpacucli', 'hpacucli'))
+            script_yaml['defaults']['hpacucli'] = Executor.check_executable(script_yaml['defaults'].get('hpacucli', 'hpacucli'))
         except FioException as e:
             # keep it, will be thrown when needed
             script_yaml['defaults']['hpacucli'] = e
@@ -230,19 +251,18 @@ class CcissSteps(object):
         identity.extend(["ctrl", "slot=%s" % slot])
         if object == "ld":
             identity.extend(["ld", "%s" % ld])
-        cciss_args = [check_executable(hpacucli)]
+        cciss_args = [Executor.check_executable(hpacucli)]
         cciss_args.extend(identity)
         cciss_args.append("modify")
         cciss_args.extend(command.split(" "))
-        hpacuclip = subprocess.Popen(cciss_args, stdin=None)
-        return hpacuclip.wait()
+
+        return Executor(cciss_args).run().check()
 
     @staticmethod
     @step
     def wait_cciss_ld(hpacucli, slot, array=None, ld=None):
         if isinstance(hpacucli, FioException):
             raise hpacucli
-        sync()
         while True:
             ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
             if len(ld_list) == 0:
@@ -285,11 +305,9 @@ class CcissSteps(object):
             argv = [hpacucli]
             argv.extend(CcissSteps.get_cciss_select(slot=slot, array=array, ld=ld))
             argv.extend(["delete", "forced"])
-            hpacuclip = subprocess.Popen(argv, stdin=None)
-            status = hpacuclip.wait()
-            if status != 0:
-                raise FioException("hpacucli failed with status %s" % status)
+            status = Executor(argv).run().check()
             sync()
+            return status
         else:
             raise FioException("No cciss volume to destroy")
 
@@ -324,10 +342,9 @@ class CcissSteps(object):
         if type == 'ldcache' and datald is not None:
             argv.append("datald=%s" % datald)
         print " ".join(argv)
-        hpacuclip = subprocess.Popen(argv, stdin=None)
-        status = hpacuclip.wait()
+        status = Executor(argv).run().check()
         # needs to touch the created ld, to be sure build is started
-        if status == 0 and type != 'ldcache':
+        if status and type != 'ldcache':
             CcissSteps.touch_ld(hpacucli, slot, array, ld)
         return status
 
@@ -344,10 +361,9 @@ class CcissSteps(object):
             argv.append("ss=%s" % stripsize)
         if size > 0:
             argv.append("size=%s" % size)
-        hpacuclip = subprocess.Popen(argv, stdin=None)
-        status = hpacuclip.wait()
+        status = Executor(argv).run().check()
         # needs to touch the created ld, to be sure build is started
-        if status == 0:
+        if status:
             CcissSteps.touch_ld(hpacucli, slot, array)
         return status
 
@@ -357,20 +373,16 @@ class CcissSteps(object):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         for drive in drives:
-            hpacuclip = subprocess.Popen([hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive], stdin=None)
-            status = hpacuclip.wait()
-            sync()
-            if status != 0:
-                return status
-        return 0
+            argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive]
+            Executor(argv).run().check()
 
 
 class ZFS(object):
     @staticmethod
     @checkscript
     def check_zfs_commands(script_yaml):
-        script_yaml['defaults']['zfs'] = check_executable(script_yaml['defaults'].get('zfs', 'zfs'))
-        script_yaml['defaults']['zpool'] = check_executable(script_yaml['defaults'].get('zpool', 'zpool'))
+        script_yaml['defaults']['zfs'] = Executor.check_executable(script_yaml['defaults'].get('zfs', 'zfs'))
+        script_yaml['defaults']['zpool'] = Executor.check_executable(script_yaml['defaults'].get('zpool', 'zpool'))
 
     @staticmethod
     def zpool_list(zpool):
@@ -394,8 +406,7 @@ class ZFS(object):
         sync()
         zpool_info = ZFS.zpool_list(zpool)
         if name in zpool_info:
-            zpoolp = subprocess.Popen([zpool, "destroy", name])
-            status = zpoolp.wait()
+            status = Executor([zpool, "destroy", name]).run().status
             if status != 0:
                 raise FioException("can't detroy zpool %s" % name)
 
@@ -415,11 +426,7 @@ class ZFS(object):
         if mount_point is not None:
             argv.extend(["-m", mount_point])
         argv.extend(vdev)
-        print " ".join(argv)
-        zpoolp = subprocess.Popen(argv, stdin=None)
-        status = zpoolp.wait()
-        if status != 0:
-            return status
+        return Executor(argv).run().check()
 
 
 class CGroup(object):
@@ -503,36 +510,32 @@ class Lvm(object):
     @step
     def do_lvm_purge(volumegroup=None):
         if volumegroup is not None and os.path.isdir("/dev/%s" % volumegroup):
-            status = subprocess.Popen(["/sbin/vgremove", "-f", volumegroup]).wait()
-            if status != 0:
-                return status
-        return subprocess.Popen(["/sbin/dmsetup", "remove_all"]).wait()
+            Executor(["vgremove", "-f", volumegroup]).run().check()
+            return Executor(["dmsetup", "remove_all"]).run().check()
 
     @staticmethod
     @step
     def do_pvcreate(blockdevice=None):
         CommonCommands.clean_drive(blockdevice)
-        return subprocess.Popen(["/sbin/pvcreate", "-ff", "-y", blockdevice]).wait()
+        return Executor(["pvcreate", "-ff", "-y", blockdevice]).run().check()
 
     @staticmethod
     @step
     def do_vgcreate(name, blockdevices):
-        argv = ["/sbin/vgcreate", name]
-        argv.extend(blockdevices)
-        return subprocess.Popen(argv).wait()
+        argv = ["vgcreate", name] + blockdevices
+        return Executor(argv).run().check()
 
     @staticmethod
     @step
     def do_vgextend(name, blockdevices):
-        argv = ["/sbin/vgextend", name]
-        argv.extend(blockdevices)
-        return subprocess.Popen(argv).wait()
+        argv = ["vgextend", name] + blockdevices
+        return Executor(argv).run().check()
 
     @staticmethod
     @step
     def do_lvcreate(name, volumegroup, extents = None, size=None, blockdevices=None):
         sync()
-        argv = ["/sbin/lvcreate", "-n", name, "-y"]
+        argv = ["lvcreate", "-n", name, "-y"]
         if extents is not None:
             argv.extend(["-l", extents])
         if size is not None:
@@ -540,19 +543,18 @@ class Lvm(object):
         argv.append(volumegroup)
         if blockdevices is not None:
             argv.extend(blockdevices)
-        print " ".join(argv)
-        return subprocess.Popen(argv).wait()
+        return Executor(argv).run().check()
 
     @staticmethod
     @step
     def do_lvconvert(name, type, poolmetadata=None, cachepool=None):
-        argv = ["/sbin/lvconvert", "--type", type, "-y"]
+        argv = ["lvconvert", "--type", type, "-y"]
         if poolmetadata is not None:
             argv.extend(["--poolmetadata", poolmetadata])
         if cachepool is not None:
             argv.extend(["--cachepool", cachepool])
         argv.append(name)
-        return subprocess.Popen(argv).wait()
+        return Executor(argv).run().check()
 
     @staticmethod
     @step
@@ -569,7 +571,7 @@ class Fio(object):
     @staticmethod
     @checkscript
     def check_fio(script_yaml):
-        script_yaml['defaults']['fio'] = check_executable(script_yaml['defaults'].get('fio', 'fio'))
+        script_yaml['defaults']['fio'] = Executor.check_executable(script_yaml['defaults'].get('fio', 'fio'))
 
     @staticmethod
     @checkscript
@@ -693,9 +695,7 @@ class Fio(object):
         argv.extend(["-b", fio])
         argv.extend(["-w", run_folder])
         argv.extend(["-t", " ".join(tests)])
-        print " ".join(argv)
-        status = subprocess.Popen(argv, stdin=subprocess.PIPE).wait()
-        return status
+        return Executor(argv, follow_stdout=True).run().check()
 
 
 # A class used as a container for command
@@ -746,7 +746,7 @@ class CommonCommands(object):
         updir = os.stat("..")
         os.chdir(old_path)
         if benchdir.st_dev != updir.st_dev:
-            return subprocess.Popen(["umount", mount_point]).wait()
+            return Executor(["umount", mount_point]).run().check()
 
     @staticmethod
     @step
@@ -772,7 +772,7 @@ class CommonCommands(object):
         sfdisk.communicate(input=input)
         if sfdisk.wait() == 0:
             sync()
-            return subprocess.Popen(["blockdev", "--flushbufs", blockdevice]).wait()
+            return Executor(["blockdev", "--flushbufs", blockdevice]).run().check()
         else:
             return False
 
@@ -791,8 +791,7 @@ class CommonCommands(object):
             stripsize = int(parse_size(stripsize, ''))
             mkfs_args.extend(["-d", "su=%d" % stripsize, "-d", "sw=%s" % stripcount])
         mkfs_args.append(part)
-        print " ".join(mkfs_args)
-        return subprocess.Popen(mkfs_args).wait()
+        return Executor(mkfs_args).run().check()
 
     @staticmethod
     @step
@@ -810,7 +809,7 @@ class CommonCommands(object):
             mount_args.append(",".join(options))
         mount_args.append(part)
         mount_args.append(mount_point)
-        return subprocess.Popen(mount_args).wait()
+        return Executor(mount_args).run().check()
 
     @staticmethod
     @step
@@ -881,7 +880,7 @@ class CommonCommands(object):
     @staticmethod
     @checkscript
     def check_fio(script_yaml):
-        script_yaml['defaults']['reboot'] = check_executable(script_yaml['defaults'].get('reboot', 'reboot'))
+        script_yaml['defaults']['reboot'] = Executor.check_executable(script_yaml['defaults'].get('reboot', 'reboot'))
 
     @staticmethod
     @step
@@ -892,11 +891,79 @@ class CommonCommands(object):
             with open(skipfile, "w") as f:
                 f.write("%d\n" % (step + 1))
         sync()
-        status = subprocess.Popen([reboot]).wait()
+        e = Executor([reboot], forget=True).run()
+        status = e.status
         if status == 0:
             exit(0)
         else:
-            return status
+            raise FioException("reboot failed: %s" % e.stderrdata)
+
+
+class Executor(object):
+    default = {'stdin': None, 'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'shell': False}
+    debug = True
+
+    @staticmethod
+    def signal_handler(signum, frame):
+        Executor.terminate_child()
+
+    @staticmethod
+    def terminate_child():
+        if Executor.process is not None:
+            Executor.process.terminate()
+            polled = 0
+            while Executor.process.poll() is None and polled < 5:
+                time.sleep(0.1)
+                polled += 1
+            if Executor.process.poll() is None:
+                Executor.process.kill()
+
+    @staticmethod
+    def check_executable(filename):
+        if filename is None:
+            raise FioException("no command given")
+        filename_path = spawn.find_executable(filename)
+        if filename_path is not None:
+            try:
+                if not os.access(filename_path, os.X_OK):
+                    return FioException("no executable command '%s'" % filename_path)
+            except OSError as e:
+                return FioException("no valid command path '%s': '%s'" % (filename_path, e))
+        else:
+            return FioException("command '%s' not found in path" % filename)
+        return filename_path
+
+    def __init__(self, argv, debug=None, follow_stdout=False, forget=False, **kwargs):
+        self.argv = [ Executor.check_executable(argv[0]) ] + argv[1:]
+        self.status = None
+        self.forget = forget
+        self.kwargs = dict(list(Executor.default.items()) + list(kwargs.items()))
+        if follow_stdout:
+            self.kwargs['stdout'] = None
+        if debug is None:
+            debug = Executor.debug
+        if debug:
+            print "'%s'" % "' '".join(self.argv)
+
+    def run(self, input=None):
+        if not self.forget:
+            previous_handler = signal.signal(signal.SIGTERM, Executor.signal_handler)
+        Executor.process = subprocess.Popen(self.argv, **self.kwargs)
+        sys.stdout.flush()
+        (self.stdoutdata, self.stderrdata) = Executor.process.communicate(input)
+        self.status = Executor.process.wait()
+        if not self.forget:
+            signal.signal(signal.SIGTERM, previous_handler)
+        Executor.process = None
+        return self
+
+    def check(self):
+        if self.status is None:
+            raise FioException("command %s not start" % " ".join(self.argv))
+        if self.status == 0:
+            return True
+        else:
+            raise ProcessException(self.argv[0], self.argv[1:], self.status, self.stdoutdata, self.stderrdata)
 
 
 def run_script(script, debug):
@@ -1140,21 +1207,6 @@ def exec_embeded_plot(code, **kwargs):
         canvas.print_figure(kwargs['filename'])
 
 
-def check_executable(filename):
-    if filename is None:
-        raise FioException("no command given")
-    filename_path = spawn.find_executable(filename)
-    if filename_path is not None:
-        try:
-            if not os.access(filename_path, os.X_OK):
-                return FioException("no executable command '%s'" % filename_path)
-        except OSError as e:
-            return FioException("no valid command path '%s': '%s'" % (filename_path, e))
-    else:
-        return FioException("command '%s' not found in path" % filename)
-    return filename_path
-
-
 def read_yaml(filename, template, defaults, variables, skip, end, debug):
     try:
         yaml_file = open(filename)
@@ -1328,4 +1380,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
+        Executor.terminate_child()
         sys.exit(1)
