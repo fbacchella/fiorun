@@ -852,10 +852,9 @@ class CommonCommands(object):
     def clean(dir):
         try:
             for root, subFolders, files in os.walk(dir, topdown=False):
-                for folder in subFolders:
-                    os.rmdir(os.path.join(root, folder))
-                for onefile in files:
-                    os.remove(os.path.join(root, onefile))
+                map(lambda x: os.rmdir(os.path.join(root, x)), subFolders)
+                map(lambda x: os.remove(os.path.join(root, x)), files)
+
         except OSError as e:
             raise FioException("clean %s failed: %s" % (dir, e))
 
