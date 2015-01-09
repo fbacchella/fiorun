@@ -66,15 +66,18 @@ class ProcessException(FioException):
 
     def __str__(self):
         str_out = ""
-        for l in cStringIO.StringIO(self.stdout):
-            str_out += "**** %s\n" % l
+        if self.stdout is not None:
+            str_out = "stdout:\n"
+            for l in cStringIO.StringIO(self.stdout):
+                str_out += "**** %s" % l
         str_err = ""
-        for l in cStringIO.StringIO(self.stderr):
-            str_err += "**** %s\n" % l
+        if self.stderr is not None:
+            str_err = "stderr:\n"
+            for l in cStringIO.StringIO(self.stderr):
+                str_err += "**** %s" % l
         output = """command %s failed
     %s
-stdout:
-%sstderr:
+%s
 %s""" % (self.command, " ".join(self.argv), str_out, str_err)
         return output
 
