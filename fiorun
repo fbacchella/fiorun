@@ -653,7 +653,7 @@ class Fio(object):
                     flush_perms = False
                     print "insufficient permissions to flush caches, results might be not reproductible"
 
-            fio_stdout = CommonCommands.run_fio(fio, fio_script, opts, variables_clean)
+            fio_stdout = Fio.run_fio(fio, fio_script, opts, variables_clean)
 
             # The fio run output is cleaned to be parsable by a csv.reader
             # don't parse error line, display them
