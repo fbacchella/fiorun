@@ -402,6 +402,10 @@ class ZFS(object):
         return zpool_info
 
     @staticmethod
+    def zpool_import(zpool, name):
+        return Executor([zpool, "import", "-f", name]).run().status
+
+    @staticmethod
     @step
     def do_destroy_zpool(zpool, name):
         if isinstance(zpool, FioException):
@@ -854,8 +858,8 @@ class CommonCommands(object):
     def clean(dir):
         try:
             for root, subFolders, files in os.walk(dir, topdown=False):
-                map(lambda x: os.rmdir(os.path.join(root, x)), subFolders)
                 map(lambda x: os.remove(os.path.join(root, x)), files)
+                map(lambda x: os.rmdir(os.path.join(root, x)), subFolders)
 
         except OSError as e:
             raise FioException("clean %s failed: %s" % (dir, e))
