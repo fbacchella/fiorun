@@ -29,6 +29,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import LogNorm
 import matplotlib
 import matplotlib.cm
+import StringIO
 
 try:
     import platform
@@ -905,6 +906,15 @@ class CommonCommands(object):
         else:
             raise FioException("reboot failed: %s" % e.stderrdata)
 
+    @staticmethod
+    @step
+    def run_script(script, shell="/bin/bash"):
+        script_file = StringIO.StringIO(script)
+        #, stdin=subprocess.PIPE
+        e =  Executor([shell], stdin=subprocess.PIPE)
+        if e.run(script).check():
+            print e.stdoutdata
+            print e.stderrdata
 
 class Executor(object):
     default = {'stdin': None, 'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'shell': False}
