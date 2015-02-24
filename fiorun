@@ -1189,6 +1189,18 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     canvas.print_figure(filename)
 
 
+def do_plot(fio_values, code = None, **kwargs):
+    if code is None:
+        plot(fio_values, **kwargs)
+    else:
+        kwargs['fio_values'] = fio_values
+        try:
+            exec code in globals(), kwargs
+        except FigureContainer as e:
+            canvas = FigureCanvasBase(e.figure)
+            canvas.print_figure(kwargs['filename'])
+
+
 def save_csv(fio_values, filename):
     with open(filename, 'wb') as csvfile:
         cvsoutput = csv.writer(csvfile, delimiter=',',
@@ -1204,14 +1216,6 @@ def read_csv(filename, values=[]):
             if row:
                 values.append(FioStat(row[0], row[1:]))
     return values
-
-
-def exec_embeded_plot(code, **kwargs):
-    try:
-        exec code in globals(), kwargs
-    except FigureContainer as e:
-        canvas = FigureCanvasBase(e.figure)
-        canvas.print_figure(kwargs['filename'])
 
 
 def read_yaml(filename, template, defaults, variables, skip, end, debug):
@@ -1261,12 +1265,8 @@ def read_yaml(filename, template, defaults, variables, skip, end, debug):
     if len(fio_values) > 0:
         if 'csv' in script_yaml:
             save_csv(fio_values, **script_yaml['csv'])
-        if 'code' not in script_yaml['plot']:
-            plot(fio_values, **script_yaml['plot'])
-        else:
-            args = script_yaml['plot']
-            args['fio_values'] = fio_values
-            exec_embeded_plot(**args)
+        if 'plot' in script_yaml:
+            do_plot(fio_values, **script_yaml['plot'])
 
 
 def main():
@@ -1357,30 +1357,29 @@ def main():
                 print e
                 break
     else:
+        kwargs = {}
         if options.yaml is not None:
             try:
                 with open(options.yaml, "r") as yaml_file:
                     script_yaml = yaml.safe_load(yaml_file)
-                graph_mode = script_yaml['plot']['mode']
-                png_output = script_yaml['plot']['filename']
-                graph_title = script_yaml['plot']['title']
+                if 'plot' in script_yaml:
+                    kwargs.update(script_yaml['plot'])
             except yaml.parser.ParserError as e:
                 print "invalid file %s:" % options.yaml
                 print e
                 exit(1)
 
         if options.graph_mode is not None:
-            graph_mode = options.graph_mode
+            kwargs['mode'] = options.graph_mode
         if options.png_output is not None:
-            png_output = options.png_output
+            kwargs['filename'] = options.png_output
         if options.graph_title is not None:
-            graph_title = options.graph_title
+            kwargs['title'] = options.graph_title
 
         values = []
         for file_use in args:
             values = read_csv(file_use)
-
-        exec_embeded_plot(script_yaml['plot']['code'], **{'fio_values': values, 'mode': graph_mode, 'filename': png_output, 'title': graph_title})
+        do_plot(values, **kwargs)
 
 
 if __name__ == "__main__":
