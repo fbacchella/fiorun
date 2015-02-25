@@ -96,6 +96,7 @@ class FigureContainer(Exception):
 
 def check_dev(blockdevice):
     try:
+        blockdevice =  os.path.realpath(blockdevice)
         blockdev = os.stat("/dev/%s" % blockdevice.replace("/dev/", "").replace('!', '/'))
         return stat.S_ISBLK(blockdev.st_mode)
     except Exception as e:
@@ -726,12 +727,19 @@ class CommonCommands(object):
     @step
     def do_unmount(mount_point=None, part=None, blockdevice=None):
         if blockdevice is not None:
+            blockdevice =  os.path.realpath(blockdevice)
             if not check_dev(blockdevice):
                 return True
             CommonCommands.do_unmount(part="/dev/%s" % blockdevice.replace('/dev/', '').replace('!', '/'))
             # substitution needed because of cciss/cXdX with HP's Smart Arrays
             old_path = os.getcwdu()
             os.chdir('/sys/block/%s' % blockdevice.replace('/dev/', '').replace('/', '!'))
+            if os.path.exists("dm/name"):
+                with open("dm/name") as f:
+                    name = f.read().strip()
+                    CommonCommands.do_unmount(part="/dev/mapper/%s" % name)
+            # find partitions for this block device and unmount them
+            # check if /sys/block/<device>/<part>/dev exists
             for d in filter(lambda x: stat.S_ISDIR(os.stat(x).st_mode) and os.path.exists("%s/dev" % x),
                             os.listdir('.')):
                 if CommonCommands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
@@ -834,6 +842,7 @@ class CommonCommands(object):
     @staticmethod
     @step
     def sched_tune(blockdevice, scheduler=None, tunes={}):
+        blockdevice =  os.path.realpath(blockdevice)
         if scheduler:
             scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/', '').replace('/', '!')
             stat_info = os.stat(scheduler_file)
