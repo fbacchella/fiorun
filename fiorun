@@ -145,6 +145,7 @@ class FioStat(object):
     write_bw = property(lambda self: self._values[47], None, None, "write bandwith")
     read_iops = property(lambda self: self._values[7], None, None, "read iop/s")
     write_iops = property(lambda self: self._values[48], None, None, "write iop/s")
+    iops = property(lambda self: self._values[7] + self._values[48], None, None, "iop/s")
     # join µs to 2ms, skip 75ms and 750ms
     latencies  = property(lambda self: [reduce(lambda x,y: x+y, self._values[99:110])] + self._values[110:117] + [reduce(lambda x,y: x+y, self._values[117:119])]+ self._values[119:121], None, None, "IO latencies")
     read_percentiles = property(lambda self : self._read_percentiles, None, None, "read latencies bucket")
