@@ -568,13 +568,16 @@ class Lvm(object):
 
     @staticmethod
     @step
-    def do_dmcache(volumegroup, logicalvolume, poolmetadata, pooldata, blockdevice, size):
-        Lvm.do_vgextend(volumegroup, [blockdevice])
-        meta_size = min(int(size)*1024/1000, 56)
-        Lvm.do_lvcreate(poolmetadata, volumegroup, size="%dM" % (meta_size))
-        Lvm.do_lvcreate(pooldata, volumegroup, size="%dG" % int(size))
-        Lvm.do_lvconvert("%s/%s" % (volumegroup, pooldata), type="cache-pool", poolmetadata="%s/%s" % (volumegroup, poolmetadata))
-        Lvm.do_lvconvert("%s/%s" % (volumegroup, logicalvolume), type="cache", cachepool="%s/%s" % (volumegroup, pooldata))
+    def do_dmcache(volumegroup, logicalvolume, pool_cache_metadata, pool_cache_data, cache_blockdevice, cache_data_size):
+        # add the cache device in the main volume group
+        Lvm.do_vgextend(volumegroup, [cache_blockdevice])
+        cache_data_size = int(parse_size(cache_data_size,"M"))
+        # man lvmcache say so
+        cache_metadata_size = int(max(cache_data_size/1000, parse_size("8M","M")))
+        Lvm.do_lvcreate(pool_cache_metadata, volumegroup, size="%dM" % (cache_metadata_size))
+        Lvm.do_lvcreate(pool_cache_data, volumegroup, size="%dM" % cache_data_size)
+        Lvm.do_lvconvert("%s/%s" % (volumegroup, pool_cache_data), type="cache-pool", poolmetadata="%s/%s" % (volumegroup, pool_cache_metadata))
+        Lvm.do_lvconvert("%s/%s" % (volumegroup, logicalvolume), type="cache", cachepool="%s/%s" % (volumegroup, pool_cache_data))
 
 
 class Fio(object):
