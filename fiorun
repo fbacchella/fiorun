@@ -685,7 +685,7 @@ class Fio(object):
 
     @staticmethod
     @step
-    def run_fio_scripts(fio_scripts, fio, result_folder, run_folder, directio=False, runtime=None, size=None, tests=['randread', 'read', 'write', 'randrw'], random_directive=False):
+    def run_fio_scripts(fio_scripts, fio, result_folder, run_folder, directio=False, runtime=None, size=None, tests=['randread', 'read', 'write', 'randrw'], random_directive=False, run_name=None):
         if isinstance(fio_scripts, FioException):
             raise fio_scripts
         argv = ["%s/fio.sh" % fio_scripts]
@@ -705,6 +705,8 @@ class Fio(object):
             argv.extend(["-s", "%s" % runtime])
         if size is not None:
             argv.extend(["-m", "%s" % int(parse_size(size, 'M'))])
+        if run_name is not None:
+            argv.extend(["-N", run_name])
         argv.extend(["-b", fio])
         argv.extend(["-w", run_folder])
         argv.extend(["-t", " ".join(tests)])
