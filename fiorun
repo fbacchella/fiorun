@@ -924,13 +924,16 @@ class CommonCommands(object):
 
     @staticmethod
     @step
-    def reboot(reboot, skipfile, step):
+    def reboot(reboot, skipfile, step, fast=False):
         if isinstance(reboot, FioException):
             raise reboot
         if os.path.isfile(skipfile):
             with open(skipfile, "w") as f:
                 f.write("%d\n" % (step + 1))
         sync()
+        if fast:
+            version = os.uname()[2]
+            Executor(["kexec", "-l", "/boot/vmlinuz-%s" % version, "--initrd=/boot/initramfs-%s.img" %version, "--reuse-cmdline"], forget=False).run()
         e = Executor([reboot], forget=True).run()
         status = e.status
         if status == 0:
