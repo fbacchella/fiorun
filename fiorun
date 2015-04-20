@@ -800,6 +800,23 @@ class CommonCommands(object):
 
     @staticmethod
     @step
+    def do_fs_ext4(part, logdev=None, stripsize=0, stripcount=0):
+        CommonCommands.do_unmount(part=part)
+        if not check_dev(part):
+            return False
+        if logdev and not check_dev(logdev):
+            return False
+        mkfs_args = ["mkfs.ext4", "-F", "-L", "bench"]
+        if logdev:
+            mkfs_args.extend(["-J", ",".join(["device=%s" % logdev, "size=2136997888"])])
+        if stripsize != 0 and stripcount != 0:
+            stripsize = int(parse_size(stripsize, ''))
+            mkfs_args.extend(["-E", ",".join(["stride=%d" % stripsize, "stripe_width=%s" % stripcount])])
+        mkfs_args.append(part)
+        return Executor(mkfs_args).run().check()
+
+    @staticmethod
+    @step
     def do_fs_xfs(part, logdev=None, stripsize=0, stripcount=0):
         CommonCommands.do_unmount(part=part)
         if not check_dev(part):
