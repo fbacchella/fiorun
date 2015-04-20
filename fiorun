@@ -379,8 +379,8 @@ class CcissSteps(object):
         if isinstance(hpacucli, FioException):
             raise hpacucli
         for drive in drives:
-            argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive]
-            Executor(argv).run().check()
+            argv = [hpacucli, "ctrl", "slot=%s" % slot, "create", "type=ld", "raid=0", "drives=%s" % drive, 'forced']
+            Executor(argv, follow_stdout=True).run().check()
 
 
 class ZFS(object):
@@ -405,8 +405,13 @@ class ZFS(object):
         return zpool_info
 
     @staticmethod
+    @step
     def zpool_import(zpool, name):
-        return Executor([zpool, "import", "-f", name]).run().status
+        status = Executor([zpool, "status", "-x", name], stdin=None, stdout=open(os.devnull, 'wb'), stderr=subprocess.STDOUT).run().status
+        if status == 0:
+            return True
+        elif status == 1:
+            return Executor([zpool, "import", "-f", name]).run().status
 
     @staticmethod
     @step
