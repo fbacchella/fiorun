@@ -1211,6 +1211,15 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     canvas = FigureCanvasBase(fig)
     canvas.print_figure(filename)
 
+def make_plots(fio_values, **kwargs):
+    if 'plot' in kwargs:
+        plotted = kwargs['plot']
+        if isinstance(plotted, list):
+            for i in plotted:
+                do_plot(fio_values, **i)
+        else:
+            do_plot(fio_values, **plotted)
+
 
 def do_plot(fio_values, code = None, **kwargs):
     if code is None:
@@ -1288,8 +1297,7 @@ def read_yaml(filename, template, defaults, variables, skip, end, debug):
     if len(fio_values) > 0:
         if 'csv' in script_yaml:
             save_csv(fio_values, **script_yaml['csv'])
-        if 'plot' in script_yaml:
-            do_plot(fio_values, **script_yaml['plot'])
+        make_plots(fio_values, **script_yaml)
 
 
 def main():
@@ -1308,11 +1316,10 @@ def main():
     parser.add_option_group(yaml_group)
 
     csv_group = OptionGroup(parser, "Plot from a list of csv")
-    csv_group.add_option("-c", "--csv", action="store_true", dest="csv_input", default=False)
+    csv_group.add_option("-c", "--csv", action="store", dest="csv_input", default=None)
     csv_group.add_option("-m", "--mode", action="store", dest="graph_mode", default=None, type="choice", choices=("bw", "iops"))
     csv_group.add_option("-p", "--png", action="store", dest="png_output", default=None, type=type(""))
     csv_group.add_option("-T", "--title", action="store", dest="graph_title", default=None, type=type(""))
-    csv_group.add_option("-Y", "--yaml", action="store", dest="yaml", default=None, type=type(""))
     parser.add_option_group(csv_group)
 
     (options, args) = parser.parse_args()
@@ -1372,7 +1379,7 @@ def main():
         parser.print_usage()
         exit(1)
 
-    if not options.csv_input:
+    if options.csv_input is None:
         for file_use in args:
             try:
                 read_yaml(file_use, template, defaults, variables, start, end, options.debug)
@@ -1381,28 +1388,27 @@ def main():
                 break
     else:
         kwargs = {}
-        if options.yaml is not None:
-            try:
-                with open(options.yaml, "r") as yaml_file:
-                    script_yaml = yaml.safe_load(yaml_file)
-                if 'plot' in script_yaml:
-                    kwargs.update(script_yaml['plot'])
-            except yaml.parser.ParserError as e:
-                print "invalid file %s:" % options.yaml
-                print e
-                exit(1)
+        yaml_file_name = args[0]
+        try:
+            with open(yaml_file_name, "r") as yaml_file:
+                script_yaml = yaml.safe_load(yaml_file)
+            #if 'plot' in script_yaml:
+            #    kwargs.update(script_yaml['plot'])
+        except yaml.parser.ParserError as e:
+            print "invalid file %s:" % options.yaml
+            print e
+            exit(1)
+        values = read_csv(options.csv_input)
 
-        if options.graph_mode is not None:
-            kwargs['mode'] = options.graph_mode
-        if options.png_output is not None:
-            kwargs['filename'] = options.png_output
-        if options.graph_title is not None:
-            kwargs['title'] = options.graph_title
+        make_plots(values, **script_yaml)
 
-        values = []
-        for file_use in args:
-            values = read_csv(file_use)
-        do_plot(values, **kwargs)
+        #if options.graph_mode is not None:
+        #    kwargs['mode'] = options.graph_mode
+        #if options.png_output is not None:
+        #    kwargs['filename'] = options.png_output
+        #if options.graph_title is not None:
+        #    kwargs['title'] = options.graph_title
+
 
 
 if __name__ == "__main__":
