@@ -275,4 +275,5 @@ Reboot
 fiorun can be run accross reboot, if the kernel must be reset, modules unloaded.
 
 The action `reboot` is used for that, it takes no argument. It will use a file to store the current step and restart at
-the next one. One should add `-S .../fiorun.skip` to command line arguments
+the next one. One should add `-S .../fiorun.skip` to command line arguments. The argument fast can be used to make a
+faster reboot, using `kexec`
