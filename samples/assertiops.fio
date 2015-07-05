@@ -8,9 +8,9 @@ refill_buffers
 norandommap
 randrepeat=1
 ioengine=sync
-bs=4k
+bs=512
 numjobs=${numjobs}
-runtime=120
+runtime=${runtime}
 time_based
 group_reporting
 name=assertiops
