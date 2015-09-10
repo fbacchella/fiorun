@@ -1131,20 +1131,20 @@ def plot(fio_values, mode="bw", filename=None, title=None):
                                 norm=LogNorm())
     #cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
     #cbar.set_label('latency color scale')
-    previous = map(lambda x: x.read_percentiles["50.00"], fio_values)
+    previous = map(lambda x: x.read_percentiles["50.000000"], fio_values)
     ax1.plot(previous, 'b-', )
     alpha = 1.0
-    for bucket in ("90.00", "95.00", "99.00"):
+    for bucket in ("90.000000", "95.000000", "99.000000"):
         current = map(lambda x: x.read_percentiles[bucket], fio_values)
         alpha /= 2
         ax1.plot(current, 'b-', alpha=alpha)
         #ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='blue', alpha=alpha)
         previous = current
 
-    previous = map(lambda x: x.write_percentiles["50.00"], fio_values)
+    previous = map(lambda x: x.write_percentiles["50.000000"], fio_values)
     ax1.plot(previous, 'g-', )
     alpha = 1.0
-    for bucket in ("90.00", "95.00", "99.00"):
+    for bucket in ("90.000000", "95.000000", "99.000000"):
         current = map(lambda x: x.write_percentiles[bucket], fio_values)
         alpha /= 2
         ax1.plot(current, 'g-', alpha=alpha)
