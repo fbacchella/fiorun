@@ -871,7 +871,7 @@ class CommonCommands(object):
     @step
     def sched_tune(blockdevice, scheduler=None, tunes={}):
         blockdevice =  os.path.realpath(blockdevice)
-        if scheduler:
+        if scheduler is not None:
             scheduler_file = '/sys/block/%s/queue/scheduler' % blockdevice.replace('/dev/', '').replace('/', '!')
             stat_info = os.stat(scheduler_file)
             if not stat.S_ISREG(stat_info.st_mode):
@@ -879,7 +879,7 @@ class CommonCommands(object):
             with open(scheduler_file, "w") as f:
                 f.write(scheduler)
         if len(tunes) > 0:
-            scheduler_dir = '/sys/block/%s/queue/iosched' % blockdevice.replace('/dev/', '').replace('/', '!')
+            scheduler_dir = '/sys/block/%s/queue' % blockdevice.replace('/dev/', '').replace('/', '!')
             stat_info = os.stat(scheduler_dir)
             if not stat.S_ISDIR(stat_info.st_mode):
                 raise FioException("invalid scheduler directory controler: %s", scheduler_dir)
