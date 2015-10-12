@@ -994,7 +994,7 @@ class Executor(object):
 
     @staticmethod
     def terminate_child():
-        if Executor.process is not None:
+        if hasattr(Executor,'process') and Executor.process is not None:
             Executor.process.terminate()
             polled = 0
             while Executor.process.poll() is None and polled < 5:
