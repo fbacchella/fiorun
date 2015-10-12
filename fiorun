@@ -587,6 +587,21 @@ class Lvm(object):
         Lvm.do_lvconvert("%s/%s" % (volumegroup, pool_cache_data), type="cache-pool", poolmetadata="%s/%s" % (volumegroup, pool_cache_metadata))
         Lvm.do_lvconvert("%s/%s" % (volumegroup, logicalvolume), type="cache", cachepool="%s/%s" % (volumegroup, pool_cache_data))
 
+class Wrapper(object):
+    def __init__(self, fio_script, fio_command):
+        self.fio_script = fio_script
+        self.fio_command = fio_command
+
+    def __enter__(self):
+        if self.fio_script is not None:
+            self.fio_input = open(self.fio_script, "r")
+        else:
+            self.fio_input = StringIO.StringIO(self.fio_command)
+        return self.fio_input
+
+    def __exit__(self, *args, **kwargs):
+        self.fio_input.close()
+        return True
 
 class Fio(object):
     @staticmethod
@@ -603,16 +618,16 @@ class Fio(object):
         script_yaml['defaults']['fio_scripts'] = fio_scripts
 
     @staticmethod
-    def run_fio(fio, fio_script, opts = [], variables = {}, prepare=False):
+    def run_fio(fio, fio_script=None, fio_command=None, opts=[], variables={}, prepare=False):
+        if fio_script is None and fio_command is None:
+            raise FioException("Neither fio_command or fio_script given")
         (script_r, script_w) = os.pipe()
-        fio_args = [fio, "/dev/fd/%d" % script_r, "--minimal"]
+        fio_args = [fio, "--minimal", "/dev/fd/%d" % script_r]
         if len(opts) > 0:
             fio_args.extend(opts)
-        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, preexec_fn=lambda: os.close(script_w))
+        fio_process = subprocess.Popen(fio_args, stdout=subprocess.PIPE, stderr=sys.stderr, preexec_fn=lambda: os.close(script_w), shell=False)
         os.close(script_r)
-
-        # Parse the fio script as a template
-        with open(fio_script, "r") as fio_script_file:
+        with Wrapper(fio_script, fio_command) as fio_script_file:
             for line in fio_script_file:
                 try:
                     os.write(script_w, string.Template(line).substitute(variables))
@@ -620,19 +635,19 @@ class Fio(object):
                     raise FioException("Unknown variable: %s" % e)
                 if prepare and line.find("[global]") >= 0:
                     os.write(script_w, "create_only=1\n")
-                    continue
         os.close(script_w)
 
         fio_stdout = fio_process.communicate()[0]
+        
         status = fio_process.wait()
         if status != 0:
             raise FioException("fio run failed: %s\n%s" % (status, fio_stdout))
         return fio_stdout
 
     @staticmethod
-    def prepare_fio(label, fio, fio_script, opts=[], variables={}):
+    def prepare_fio(label, fio, fio_script, fio_command, opts=[], variables={}):
         variables_clean = Fio.get_fio_variables(label, variables)
-        Fio.run_fio(fio, fio_script, opts, variables_clean, prepare=True)
+        Fio.run_fio(fio, fio_script, fio_command, opts, variables_clean, prepare=True)
 
     @staticmethod
     def get_fio_variables(label, variables={}):
@@ -647,13 +662,14 @@ class Fio(object):
 
     @staticmethod
     @step
-    def do_fio(label, fio, fio_script, opts=[], count=1, variables={}):
+    def do_fio(label, fio, fio_script=None, fio_command=None, opts=[], count=1, variables={}, prepare=False):
         if isinstance(fio, FioException):
             raise fio
 
         variables_clean = Fio.get_fio_variables(label, variables)
 
-        Fio.prepare_fio(label, fio, fio_script, opts, variables)
+        if prepare:
+            Fio.prepare_fio(label, fio, fio_script, fio_command, opts, variables)
 
         flush_perms = True
         for i in range(count):
@@ -666,7 +682,7 @@ class Fio(object):
                     flush_perms = False
                     print "insufficient permissions to flush caches, results might be not reproductible"
 
-            fio_stdout = Fio.run_fio(fio, fio_script, opts, variables_clean)
+            fio_stdout = Fio.run_fio(fio, fio_script, fio_command, opts, variables_clean)
 
             # The fio run output is cleaned to be parsable by a csv.reader
             # don't parse error line, display them
