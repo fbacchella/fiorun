@@ -1258,26 +1258,34 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     canvas = FigureCanvasBase(fig)
     canvas.print_figure(filename)
 
-def make_plots(fio_values, **kwargs):
+def make_plots(fio_values, variables={}, **kwargs):
     if 'plot' in kwargs:
         plotted = kwargs['plot']
         if isinstance(plotted, list):
             for i in plotted:
-                do_plot(fio_values, **i)
+                do_plot(fio_values, variables=variables, **i)
         else:
-            do_plot(fio_values, **plotted)
+            do_plot(fio_values, variables=variables, **plotted)
 
 
-def do_plot(fio_values, code = None, **kwargs):
+def do_plot(fio_values, code = None, variables={}, **kwargs):
     if code is None:
         plot(fio_values, **kwargs)
     else:
+        with Wrapper(None, code) as plot_script:
+            plot_script_parsed = StringIO.StringIO()
+            for line in plot_script:
+                try:
+                    plot_script_parsed.write(string.Template(line).substitute(variables))
+                except KeyError as e:
+                    raise FioException("Unknown variable: %s" % e)
+            code = plot_script_parsed.getvalue()
         kwargs['fio_values'] = fio_values
         try:
             exec code in globals(), kwargs
         except FigureContainer as e:
             canvas = FigureCanvasBase(e.figure)
-            canvas.print_figure(kwargs['filename'])
+            canvas.print_figure(string.Template(kwargs['filename']).substitute(variables))
 
 
 def save_csv(fio_values, filename):
@@ -1447,7 +1455,7 @@ def main():
             exit(1)
         values = read_csv(options.csv_input)
 
-        make_plots(values, **script_yaml)
+        make_plots(values, variables, **script_yaml)
 
         #if options.graph_mode is not None:
         #    kwargs['mode'] = options.graph_mode
