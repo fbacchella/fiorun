@@ -57,6 +57,7 @@ except:
 class FioException(Exception):
     pass
 
+
 class ProcessException(FioException):
     def __init__(self, command, argv, status, stdout, stderr):
         self.command = command
@@ -99,7 +100,7 @@ def check_dev(blockdevice):
         blockdevice =  os.path.realpath(blockdevice)
         blockdev = os.stat("/dev/%s" % blockdevice.replace("/dev/", "").replace('!', '/'))
         return stat.S_ISBLK(blockdev.st_mode)
-    except Exception as e:
+    except Exception:
         return False
 
 units = {
@@ -148,8 +149,8 @@ class FioStat(object):
     iops = property(lambda self: self._values[7] + self._values[48], None, None, "iop/s")
     # join µs to 2ms, skip 75ms and 750ms
     latencies  = property(lambda self: [reduce(lambda x,y: x+y, self._values[99:110])] + self._values[110:117] + [reduce(lambda x,y: x+y, self._values[117:119])]+ self._values[119:121], None, None, "IO latencies")
-    read_percentiles = property(lambda self : self._read_percentiles, None, None, "read latencies bucket")
-    write_percentiles = property(lambda self : self._write_percentiles, None, None, "write latencies bucket")
+    read_percentiles = property(lambda self: self._read_percentiles, None, None, "read latencies bucket")
+    write_percentiles = property(lambda self: self._write_percentiles, None, None, "write latencies bucket")
 
     def __init__(self, label, values):
         if len(values) < 1:
@@ -956,6 +957,7 @@ class CommonCommands(object):
             print e.stdoutdata
             print e.stderrdata
 
+
 class Executor(object):
     default = {'stdin': None, 'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'shell': False, 'close_fds': True}
     debug = True
@@ -1328,7 +1330,7 @@ def read_yaml(filename, template, defaults, variables, skip, end, debug):
 
 
 def main():
-    parser = OptionParser(usage="\n%prog [options] yaml_script+\n%prog -c [options] csv_values+")
+    parser = OptionParser(usage="\n%prog [options] yaml_script\n%prog -c csv_values [options] yaml_script")
 
     yaml_group = OptionGroup(parser, "Yaml script execution")
     yaml_group.add_option("-V", "--variable", dest="variables", action="append", default=[])
