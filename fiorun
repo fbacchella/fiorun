@@ -162,9 +162,11 @@ class FioStat(object):
         self._read_percentiles = {}
         for (key, value) in map(lambda x: x.split("="), self._values[17:37]):
             self._read_percentiles[key] = int(value) / 1000.0
+        self._read_percentiles['100.000000'] = float(self._values[14]) / 1000.0
         self._write_percentiles = {}
         for (key, value) in map(lambda x: x.split("="), self._values[58:78]):
             self._write_percentiles[key] = int(value) / 1000.0
+        self._write_percentiles['100.000000'] = float(self._values[55]) / 1000.0
 
 
 # A class used as a container for command
