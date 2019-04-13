@@ -1011,6 +1011,20 @@ class CommonCommands(object):
             print((e.stdoutdata))
             print((e.stderrdata))
 
+    @staticmethod
+    @step
+    def sync():
+        sync()
+        try:
+            with open('/proc/sys/vm/drop_caches', 'w') as drop_caches:
+                drop_caches.write('3')
+        except IOError:
+            print("insufficient permissions to flush caches, results might be not reproductible")
+
+    @staticmethod
+    @step
+    def swapoff():
+        return Executor(['swapoff', '-a']).run().check()
 
 
 class Executor(object):
