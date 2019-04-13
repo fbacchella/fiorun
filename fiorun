@@ -750,9 +750,7 @@ class Fio(object):
                 raise FioException("results folder %s is not a directory" % result_folder)
         argv.extend(["-o", result_folder])
         if directio:
-            argv.extend(["-d", "1"])
-        else:
-            argv.extend(["-d", "0"])
+            argv.extend(["-d"])
         if random_directive:
             argv.extend(["-R", random_directive])
         if runtime is not None:
@@ -763,13 +761,16 @@ class Fio(object):
             argv.extend(["-N", run_name])
         if distant:
             argv.extend(["-D"])
+        if individual_files:
+            argv.extend(["-i"])
         if engine is not None:
             argv.extend(["-E", engine])
             if engine_configuration is not None:
                 argv.extend(["-C", engine_configuration])
         argv.extend(["-b", fio])
         argv.extend(["-w", run_folder])
-        argv.extend(["-t", " ".join(tests)])
+        for t in tests:
+            argv.extend(["-t", t])
         return Executor(argv, follow_stdout=True).run().check()
 
 
