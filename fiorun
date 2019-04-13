@@ -588,6 +588,33 @@ class Lvm(object):
         Lvm.do_lvconvert("%s/%s" % (volumegroup, pool_cache_data), type="cache-pool", poolmetadata="%s/%s" % (volumegroup, pool_cache_metadata))
         Lvm.do_lvconvert("%s/%s" % (volumegroup, logicalvolume), type="cache", cachepool="%s/%s" % (volumegroup, pool_cache_data))
 
+
+class tuned(object):
+    @staticmethod
+    @step
+    def stop_tuned():
+        argv = ["service", 'tuned', 'stop']
+        return Executor(argv).run().check()
+
+    @staticmethod
+    @step
+    def start_tuned():
+        argv = ["service", 'tuned', 'start']
+        return Executor(argv).run().check()
+
+    @staticmethod
+    @step
+    def set_tuned(profile):
+        argv = ["tuned", '--profile', profile]
+        return Executor(argv).run().check()
+
+    @staticmethod
+    @step
+    def set_tuned_adm(profile):
+        argv = ["tuned-adm", 'profile', profile]
+        return Executor(argv).run().check()
+
+
 class Wrapper(object):
     def __init__(self, fio_script, fio_command):
         self.fio_script = fio_script
