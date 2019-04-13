@@ -18,10 +18,11 @@ import fcntl
 import struct
 import signal
 import time
-import cStringIO
+import io
 from distutils import spawn
 
 from tempfile import mkdtemp
+from functools import reduce
 os.environ['MPLCONFIGDIR'] = mkdtemp()
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure, SubplotParams
@@ -29,7 +30,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.colors import LogNorm
 import matplotlib
 import matplotlib.cm
-import StringIO
+import io
 
 try:
     import platform
@@ -70,12 +71,12 @@ class ProcessException(FioException):
         str_out = ""
         if self.stdout is not None:
             str_out = "stdout:\n"
-            for l in cStringIO.StringIO(self.stdout):
+            for l in io.StringIO(self.stdout):
                 str_out += "**** %s" % l
         str_err = ""
         if self.stderr is not None:
             str_err = "stderr:\n"
-            for l in cStringIO.StringIO(self.stderr):
+            for l in io.StringIO(str(self.stderr, 'utf-8', 'ignore')):
                 str_err += "**** %s" % l
         output = """command %s failed
     %s
@@ -160,11 +161,11 @@ class FioStat(object):
         if self.version == 3 and len(values) < 120:
             raise FioException("invalid fio stat line for run label '%s': %s" % (label, values))
         self._read_percentiles = {}
-        for (key, value) in map(lambda x: x.split("="), self._values[17:37]):
+        for (key, value) in [x.split("=") for x in self._values[17:37]]:
             self._read_percentiles[key] = int(value) / 1000.0
         self._read_percentiles['100.000000'] = float(self._values[14]) / 1000.0
         self._write_percentiles = {}
-        for (key, value) in map(lambda x: x.split("="), self._values[58:78]):
+        for (key, value) in [x.split("=") for x in self._values[58:78]]:
             self._write_percentiles[key] = int(value) / 1000.0
         self._write_percentiles['100.000000'] = float(self._values[55]) / 1000.0
 
@@ -230,7 +231,7 @@ class CcissSteps(object):
             ld_info = ld_list[ld]
         elif array != None:
             # Touch the last ld
-            keys = ld_list.keys()
+            keys = list(ld_list.keys())
             keys.sort()
             keys.reverse()
             ld_info = ld_list[keys[0]]
@@ -278,13 +279,13 @@ class CcissSteps(object):
                 raise FioException("no ld to wait for")
 
             wait_ld = False
-            for ld_info in ld_list.values():
+            for ld_info in list(ld_list.values()):
                 if ld_info.get("Parity Initialization Status", "") == "Initialization Completed":
                     continue
                 elif ld_info.get("Parity Initialization Status", "") == "Queued":
                     wait_ld = True
                 if "Parity Initialization Progress" in ld_info:
-                    print "%s: %s" % (ld_info['Disk Name'], ld_info["Parity Initialization Progress"])
+                    print(("%s: %s" % (ld_info['Disk Name'], ld_info["Parity Initialization Progress"])))
                     wait_ld = True
                 if wait_ld:
                     time.sleep(30)
@@ -302,7 +303,7 @@ class CcissSteps(object):
             ld_list = CcissSteps.get_cciss_info(slot=slot, array=array, ld=ld, hpacucli=hpacucli)
             if len(ld_list) == 0:
                 return
-            for ld_info in ld_list.values():
+            for ld_info in list(ld_list.values()):
                 if 'Disk Name' in ld_info:
                     blockdevice = ld_info['Disk Name']
                     if check_dev(blockdevice):
@@ -350,7 +351,7 @@ class CcissSteps(object):
             argv.append("size=%s" % int(parse_size(size, 'M')))
         if type == 'ldcache' and datald is not None:
             argv.append("datald=%s" % datald)
-        print " ".join(argv)
+        print((" ".join(argv)))
         status = Executor(argv, follow_stdout=True).run().check()
         # needs to touch the created ld, to be sure build is started
         if status and type != 'ldcache':
@@ -436,10 +437,10 @@ class ZFS(object):
         sync()
         argv = [zpool, "create", "-f", name ]
         if len(pool_properties) > 0:
-            for (key, value) in pool_properties.items():
+            for (key, value) in list(pool_properties.items()):
                 argv.extend(["-o", "%s=%s" % (key, value)])
         if len(fs_properties) > 0:
-            for (key, value) in fs_properties.items():
+            for (key, value) in list(fs_properties.items()):
                 argv.extend(["-O", "%s=%s" % (key, value)])
         if mount_point is not None:
             argv.extend(["-m", mount_point])
@@ -481,7 +482,7 @@ class CGroup(object):
             device = os.stat(mountpoint).st_dev
         major = os.major(device)
         minor = os.minor(device) & ~15
-        for (key, value) in tunables.items():
+        for (key, value) in list(tunables.items()):
             with open("%s/%s" % (subgroup, key), "w") as f:
                 f.write("%d:%d %s" % (major, minor, value))
 
@@ -500,14 +501,14 @@ class CGroup(object):
         try:
            # Fork a child process so the parent can exit.
            pid = os.fork()
-        except OSError, e:
-           raise Exception, "%s [%d]" % (e.strerror, e.errno)
+        except OSError as e:
+           raise Exception("%s [%d]" % (e.strerror, e.errno))
         if (pid == 0):
             try:
                 CGroup.sub_run_fio((csv_r_fd, csv_w_fd), mount_point, tunables,
                                    label=label, fio_script=fio_script, fio=fio, opts=opts, count=count, variables=variables)
             except Exception as e:
-                print e
+                print(e)
                 exit(1)
         else:
             os.close(csv_w_fd)
@@ -596,7 +597,7 @@ class Wrapper(object):
         if self.fio_script is not None:
             self.fio_input = open(self.fio_script, "r")
         else:
-            self.fio_input = StringIO.StringIO(self.fio_command)
+            self.fio_input = io.StringIO(self.fio_command)
         return self.fio_input
 
     def __exit__(self, *args, **kwargs):
@@ -653,7 +654,7 @@ class Fio(object):
     def get_fio_variables(label, variables={}):
         # if a variable is a dict, use the label as a key to the real value
         variables_clean = {}
-        for (key, value) in variables.items():
+        for (key, value) in list(variables.items()):
             if isinstance(value, type({})):
                 variables_clean[key] = value[label]
             else:
@@ -680,7 +681,7 @@ class Fio(object):
                         drop_caches.write('3')
                 except IOError:
                     flush_perms = False
-                    print "insufficient permissions to flush caches, results might be not reproductible"
+                    print("insufficient permissions to flush caches, results might be not reproductible")
 
             fio_stdout = Fio.run_fio(fio, fio_script, fio_command, opts, variables_clean)
 
@@ -691,7 +692,7 @@ class Fio(object):
                     fio_stdout = found[0]
                     break
                 elif len(found[1]) > 0:
-                    print found[1]
+                    print((found[1]))
             fio_stdout = fio_stdout.replace("%", "")
 
             # a while because this regex will not manage two consecutive string
@@ -702,7 +703,7 @@ class Fio(object):
                 if count == 0:
                     break
             try:
-                cvs_line = csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC).next()
+                cvs_line = next(csv.reader(re.split("\n", fio_stdout), delimiter=';', quoting=csv.QUOTE_NONNUMERIC))
                 yield (label, cvs_line)
             except ValueError as e:
                 raise FioException("can't parse fio run output: %s\n%s" % (e, fio_stdout))
@@ -770,7 +771,7 @@ class CommonCommands(object):
                 return True
             CommonCommands.do_unmount(part="/dev/%s" % blockdevice.replace('/dev/', '').replace('!', '/'))
             # substitution needed because of cciss/cXdX with HP's Smart Arrays
-            old_path = os.getcwdu()
+            old_path = os.getcwd()
             os.chdir('/sys/block/%s' % blockdevice.replace('/dev/', '').replace('/', '!'))
             if os.path.exists("dm/name"):
                 with open("dm/name") as f:
@@ -778,8 +779,7 @@ class CommonCommands(object):
                     CommonCommands.do_unmount(part="/dev/mapper/%s" % name)
             # find partitions for this block device and unmount them
             # check if /sys/block/<device>/<part>/dev exists
-            for d in filter(lambda x: stat.S_ISDIR(os.stat(x).st_mode) and os.path.exists("%s/dev" % x),
-                            os.listdir('.')):
+            for d in [x for x in os.listdir('.') if stat.S_ISDIR(os.stat(x).st_mode) and os.path.exists("%s/dev" % x)]:
                 if CommonCommands.do_unmount(part="/dev/%s" % d.replace('!', '/')) != 0:
                     os.chdir(old_path)
                     return False
@@ -794,7 +794,7 @@ class CommonCommands(object):
                     break
         if not mount_point or not os.path.isdir(mount_point):
             return 0
-        old_path = os.getcwdu()
+        old_path = os.getcwd()
         os.chdir(mount_point)
         benchdir = os.stat(".")
         updir = os.stat("..")
@@ -910,7 +910,7 @@ class CommonCommands(object):
             stat_info = os.stat(scheduler_dir)
             if not stat.S_ISDIR(stat_info.st_mode):
                 raise FioException("invalid scheduler directory controler: %s", scheduler_dir)
-            for (tune, value) in tunes.items():
+            for (tune, value) in list(tunes.items()):
                 tune_file = '%s/%s' % (scheduler_dir, tune )
                 stat_info = os.stat(tune_file)
                 if not stat.S_ISREG(stat_info.st_mode):
@@ -923,8 +923,8 @@ class CommonCommands(object):
     def clean(dir):
         try:
             for root, subFolders, files in os.walk(dir, topdown=False):
-                map(lambda x: os.remove(os.path.join(root, x)), files)
-                map(lambda x: os.rmdir(os.path.join(root, x)), subFolders)
+                list([os.remove(os.path.join(root, x)) for x in files])
+                list([os.rmdir(os.path.join(root, x)) for x in subFolders])
 
         except OSError as e:
             raise FioException("clean %s failed: %s" % (dir, e))
@@ -932,20 +932,20 @@ class CommonCommands(object):
     @staticmethod
     @step
     def mkpath(dir):
-        old_path = os.getcwdu()
+        old_path = os.getcwd()
         os.chdir(os.path.sep)
         for step in dir.split(os.path.sep)[1:]:
             try:
                 if not stat.S_ISDIR(os.stat(step).st_mode):
-                    raise FioException("a element of path is not a directory: %s%s%s" % (os.getcwdu(), os.path.sep, step))
+                    raise FioException("a element of path is not a directory: %s%s%s" % (os.getcwd(), os.path.sep, step))
             except OSError as e:
                 if e.errno == 2 and e.filename == step:
                     try:
                         os.mkdir(step)
                     except OSError as e:
-                        raise FioException("cant create directory %s%s%s: %s" % (os.getcwdu(), os.path.sep, step, e))
+                        raise FioException("cant create directory %s%s%s: %s" % (os.getcwd(), os.path.sep, step, e))
                 else:
-                    raise FioException("cant create directory %s%s%s: s" % (os.getcwdu(), os.path.sep, step, e))
+                    raise FioException("cant create directory %s%s%s: s" % (os.getcwd(), os.path.sep, step, e))
             os.chdir(step)
         os.chdir(old_path)
 
@@ -976,12 +976,13 @@ class CommonCommands(object):
     @staticmethod
     @step
     def run_script(script, shell="/bin/bash"):
-        script_file = StringIO.StringIO(script)
+        script_file = io.StringIO(script)
         #, stdin=subprocess.PIPE
         e =  Executor([shell], stdin=subprocess.PIPE)
         if e.run(script).check():
-            print e.stdoutdata
-            print e.stderrdata
+            print((e.stdoutdata))
+            print((e.stderrdata))
+
 
 
 class Executor(object):
@@ -1028,7 +1029,7 @@ class Executor(object):
         if debug is None:
             debug = Executor.debug
         if debug:
-            print "'%s'" % "' '".join(self.argv)
+            print(("'%s'" % "' '".join(self.argv)))
 
     def run(self, input=None):
         if not self.forget:
@@ -1054,7 +1055,7 @@ class Executor(object):
 def run_script(script, debug):
     fio_values = []
     for (f, kwargs) in script:
-        print "******* %s(%s)" % (f.__name__, kwargs)
+        print(("******* %s(%s)" % (f.__name__, kwargs)))
         if debug:
             continue
         try:
@@ -1083,12 +1084,12 @@ def run_yaml(script_yaml, start, end, debug):
         # it's a command without arguments
         if type(cmd) == type(""):
             cmd = {cmd: None}
-        cmd_name = cmd.keys()[0]
+        cmd_name = list(cmd.keys())[0]
         cmd_args = cmd[cmd_name]
         if cmd_args == None:
             cmd_args = {}
         if cmd_name not in stepsfuncs:
-            print "unknown %s" % cmd_name
+            print(("unknown %s" % cmd_name))
         if cmd_name not in stepsfuncs:
             raise FioException("unknown action: %s" % cmd_name)
         cmd_func = stepsfuncs[cmd_name]
@@ -1107,7 +1108,7 @@ def run_yaml(script_yaml, start, end, debug):
                 kwargs[arg_name] = step
         # not all arguments from the yaml file used, something is wrong
         if len(cmd_args) > 0:
-            raise FioException("Unused argument %s for %s" % (cmd_args.keys(), cmd_name))
+            raise FioException("Unused argument %s for %s" % (list(cmd_args.keys()), cmd_name))
         script.append((cmd_func, kwargs))
         step += 1
     return run_script(script, debug)
@@ -1159,21 +1160,21 @@ def plot(fio_values, mode="bw", filename=None, title=None):
                                 norm=LogNorm())
     #cbar = fig.colorbar(latency_spots, ax=[ax1, ax2], drawedges=False, orientation="horizontal")
     #cbar.set_label('latency color scale')
-    previous = map(lambda x: x.read_percentiles["50.000000"], fio_values)
+    previous = [x.read_percentiles["50.000000"] for x in fio_values]
     ax1.plot(previous, 'b-', )
     alpha = 1.0
     for bucket in ("90.000000", "95.000000", "99.000000"):
-        current = map(lambda x: x.read_percentiles[bucket], fio_values)
+        current = [x.read_percentiles[bucket] for x in fio_values]
         alpha /= 2
         ax1.plot(current, 'b-', alpha=alpha)
         #ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='blue', alpha=alpha)
         previous = current
 
-    previous = map(lambda x: x.write_percentiles["50.000000"], fio_values)
+    previous = [x.write_percentiles["50.000000"] for x in fio_values]
     ax1.plot(previous, 'g-', )
     alpha = 1.0
     for bucket in ("90.000000", "95.000000", "99.000000"):
-        current = map(lambda x: x.write_percentiles[bucket], fio_values)
+        current = [x.write_percentiles[bucket] for x in fio_values]
         alpha /= 2
         ax1.plot(current, 'g-', alpha=alpha)
         #ax1.fill_between(numpy.arange(len(ms_values)), previous, current, facecolor='green', alpha=alpha)
@@ -1230,7 +1231,7 @@ def plot(fio_values, mode="bw", filename=None, title=None):
         ax2.plot(x, to_plot_write, 'g+-')
 
     ax2.set_ylim(0, y_max_new * 1.05)
-    yticks = map(lambda x: (1.0 * x / base) * y_max_new, range(base + 1))
+    yticks = [(1.0 * x / base) * y_max_new for x in range(base + 1)]
     ax2.set_yticks(yticks, minor=False)
 
     if filename:
@@ -1251,13 +1252,13 @@ def plot2(fio_values, mode="bw", filename=None, title=None):
     ax.set_xscale('log')
     plotted = []
     for row in fio_values:
-        reversed = map(lambda (x, y) : [y, float(x)], row.read_percentiles.items())
+        reversed = [[x_y[1], float(x_y[0])] for x_y in list(row.read_percentiles.items())]
         values = numpy.sort(reversed, axis=0).transpose()
         plotted.extend(ax.plot(values[0], values[1],"-.", label="%s read" % row.label))
     plotted.reverse()
     for row in fio_values:
         previous = plotted.pop()
-        reversed = map(lambda (x,y) : [y, float(x)], row.write_percentiles.items())
+        reversed = [[x_y1[1], float(x_y1[0])] for x_y1 in list(row.write_percentiles.items())]
         values = numpy.sort(reversed, axis=0).transpose()
         ax.plot(values[0], values[1],"-+", color=previous.get_color(), label="%s write" % row.label)
     ax.set_xlim(0.5, 5000)
@@ -1281,7 +1282,7 @@ def do_plot(fio_values, code = None, variables={}, **kwargs):
         plot(fio_values, **kwargs)
     else:
         with Wrapper(None, code) as plot_script:
-            plot_script_parsed = StringIO.StringIO()
+            plot_script_parsed = io.StringIO()
             for line in plot_script:
                 try:
                     plot_script_parsed.write(string.Template(line).substitute(variables))
@@ -1290,7 +1291,7 @@ def do_plot(fio_values, code = None, variables={}, **kwargs):
             code = plot_script_parsed.getvalue()
         kwargs['fio_values'] = fio_values
         try:
-            exec code in globals(), kwargs
+            exec(code, globals(), kwargs)
         except FigureContainer as e:
             canvas = FigureCanvasBase(e.figure)
             canvas.print_figure(string.Template(kwargs['filename']).substitute(variables))
@@ -1318,9 +1319,9 @@ def read_yaml(filename, template, defaults, variables, skip, end, debug):
         yaml_file = open(filename)
         script_yaml = yaml.safe_load(yaml_file)
         yaml_file.close()
-    except (yaml.parser.ParserError,yaml.scanner.ScannerError)  as e:
-        print "invalid yaml file %s:" % filename
-        print e
+    except (yaml.parser.ParserError,yaml.scanner.ScannerError) as e:
+        print(("invalid yaml file %s:" % filename))
+        print(e)
         return
 
     #####
@@ -1335,21 +1336,22 @@ def read_yaml(filename, template, defaults, variables, skip, end, debug):
             if section in template:
                 if section not in script_yaml:
                     script_yaml[section] = {}
-                for (key, value) in template[section].items():
+                for (key, value) in list(template[section].items()):
                     if key not in script_yaml[section]:
                         script_yaml[section][key] = value
 
     if not 'defaults' in script_yaml:
         script_yaml['defaults'] = {}
-    for (key, value) in defaults.items():
+    for (key, value) in list(defaults.items()):
         script_yaml['defaults'][key] = value
 
     if not 'variables' in script_yaml:
         script_yaml['variables'] = {}
-    for (key, value) in variables.items():
+    for (key, value) in list(variables.items()):
         script_yaml['variables'][key] = value
 
     parsed = string.Template(yaml.dump(script_yaml)).substitute(script_yaml['variables'])
+    #print(parsed)
     script_yaml = yaml.safe_load(parsed)
 
     # check the executable path
@@ -1393,8 +1395,8 @@ def main():
             template = yaml.safe_load(yaml_file)
             yaml_file.close()
         except yaml.parser.ParserError as e:
-            print "invalid yaml template %s:" % options.template
-            print e
+            print(("invalid yaml template %s:" % options.template))
+            print(e)
             return
     else:
         template = None
@@ -1427,10 +1429,10 @@ def main():
                     f.write("%d\n" % 0)
             defaults['skipfile'] = options.skipfile
         except IOError as e:
-            print e
+            print(e)
             exit(1)
         except ValueError as e:
-            print "cant parse skipe file %s content: '%s'" % (options.skipfile, skipline)
+            print(("cant parse skipe file %s content: '%s'" % (options.skipfile, skipline)))
             exit(1)
     elif options.onestep is not None:
         start = options.onestep
@@ -1447,7 +1449,7 @@ def main():
             try:
                 read_yaml(file_use, template, defaults, variables, start, end, options.debug)
             except FioException as e:
-                print e
+                print(e)
                 break
     else:
         kwargs = {}
@@ -1458,8 +1460,8 @@ def main():
             #if 'plot' in script_yaml:
             #    kwargs.update(script_yaml['plot'])
         except yaml.parser.ParserError as e:
-            print "invalid file %s:" % options.yaml
-            print e
+            print(("invalid file %s:" % options.yaml))
+            print(e)
             exit(1)
         values = read_csv(options.csv_input)
 
