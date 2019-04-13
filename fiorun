@@ -1121,6 +1121,9 @@ def run_yaml(script_yaml, start, end, debug):
     step = 0
     if start is not None:
         step = start
+    if not isinstance(script_yaml['run'],type([])):
+        raise FioException("run dont contains an array of steps")
+
     for cmd in script_yaml['run'][start:end]:
         # if the command is a plain string,
         # it's a command without arguments
