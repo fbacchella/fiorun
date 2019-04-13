@@ -246,7 +246,7 @@ class CcissSteps(object):
     def check_cciss(script_yaml):
         # hpacucli is not mandatory, don't failed on it
         try:
-            script_yaml['defaults']['hpacucli'] = Executor.check_executable(script_yaml['defaults'].get('hpacucli', 'hpacucli'))
+            script_yaml['defaults']['hpacucli'] = Executor.check_executable(script_yaml['defaults'].get('hpacucli', 'ssacli'))
         except FioException as e:
             # keep it, will be thrown when needed
             script_yaml['defaults']['hpacucli'] = e
